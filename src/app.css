@@ -1,0 +1,32 @@
+@import "tailwindcss";
+@plugin "daisyui";
+
+:root {
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+.axis-label {
+  font-size: 12px;
+}
+
+.x-axis text, .y-axis text {
+  fill: #a6adba;
+  font-size: 11px;
+}
+
+.x-axis path, .y-axis path,
+.x-axis line, .y-axis line {
+  stroke: #4a5568;
+}
