@@ -1,0 +1,166 @@
+{
+  "peer_id": "oboard-mac",
+  "status": "ok",
+  "listeners": [
+    "udp://0.0.0.0:6666",
+    "tcp://0.0.0.0:6667",
+    "ws://0.0.0.0:6668",
+    "quic://0.0.0.0:6669"
+  ],
+  "known_peers": [
+    "tcp://120.25.179.85:10102",
+    "tcp://127.0.0.1:7002",
+    "udp://127.0.0.1:7001",
+    "ws://127.0.0.1:7003",
+    "quic://127.0.0.1:7004"
+  ],
+  "peers": [
+    {
+      "id": "oboard-mac-2",
+      "version": "0.1.0",
+      "metadata": {
+
+      },
+      "public_key": "309fb9fd10bca0d55d69fbfbee88143d705913edf55d050056eef7346be1901d",
+      "adresses": [
+        "quic://127.0.0.1:7004",
+        "udp://0.0.0.0:7001",
+        "tcp://0.0.0.0:7002",
+        "ws://0.0.0.0:7003",
+        "quic://0.0.0.0:7004"
+      ],
+      "connections": [
+        {
+          "id": "6b66802a80a05f84b6bd30520f26481f99a088b23063361ad50d27b445e466f0",
+          "local_addr": "tcp://0.0.0.0:7002",
+          "remote_addr": "tcp://127.0.0.1:6667",
+          "peer_id": "oboard-mac",
+          "state": "Connected",
+          "last_seen": "1770453522000",
+          "quality": 0,
+          "relay": 1,
+          "latency_history": [],
+          "packets_sent": 21,
+          "packets_lost": 0,
+          "bytes_sent": "0",
+          "bytes_received": "3800",
+          "last_ping_time": "1770453522000",
+          "bandwidth_mbps": 0,
+          "packet_loss_rate": 0
+        },
+        {
+          "id": "b34ea4f50df5c064ace2b76012a359f58b882b4913ce6ece0848fffca4dd45da",
+          "local_addr": "udp://0.0.0.0:7001",
+          "remote_addr": "udp://127.0.0.1:6666",
+          "peer_id": "oboard-mac",
+          "state": "Connected",
+          "last_seen": "1770453522000",
+          "quality": 0,
+          "relay": 1,
+          "latency_ms": 0,
+          "latency_history": [0, 0, 0, 0, 0],
+          "packets_sent": 21,
+          "packets_lost": 0,
+          "bytes_sent": "0",
+          "bytes_received": "4547",
+          "last_ping_time": "1770453522000",
+          "bandwidth_mbps": 0,
+          "packet_loss_rate": 0
+        },
+        {
+          "id": "57f850a73e4feca95838f8fb789d8519b7eb8206f78bb0607c6918657a0a2f4b",
+          "local_addr": "quic://0.0.0.0:7004",
+          "remote_addr": "quic://127.0.0.1:6669",
+          "peer_id": "oboard-mac",
+          "state": "Connected",
+          "last_seen": "1770453522000",
+          "quality": 0,
+          "relay": 1,
+          "latency_ms": 0,
+          "latency_history": [0, 0, 0, 0, 0],
+          "packets_sent": 21,
+          "packets_lost": 0,
+          "bytes_sent": "0",
+          "bytes_received": "4791",
+          "last_ping_time": "1770453522000",
+          "bandwidth_mbps": 0,
+          "packet_loss_rate": 0
+        }
+      ]
+    },
+    {
+      "id": "oboard-mac",
+      "version": "0.1.0",
+      "metadata": {
+        "home": "https://www.oboard.fun/"
+      },
+      "public_key": "309fb9fd10bca0d55d69fbfbee88143d705913edf55d050056eef7346be1901d",
+      "adresses": [
+        "udp://0.0.0.0:6666",
+        "tcp://0.0.0.0:6667",
+        "ws://0.0.0.0:6668",
+        "quic://0.0.0.0:6669"
+      ],
+      "connections": [
+        {
+          "id": "143c7cf8d5df797cdcc0d1dc836930ad9be6fcdfeff74f9c0794cf2f456be522",
+          "local_addr": "tcp://0.0.0.0:6667",
+          "remote_addr": "tcp://127.0.0.1:7002",
+          "peer_id": "oboard-mac-2",
+          "state": "Connected",
+          "last_seen": "1770453523000",
+          "quality": 0,
+          "relay": 1,
+          "latency_history": [],
+          "packets_sent": 28,
+          "packets_lost": 0,
+          "bytes_sent": "0",
+          "bytes_received": "4542",
+          "last_ping_time": "1770453522000",
+          "bandwidth_mbps": 0.004542,
+          "packet_loss_rate": 0
+        },
+        {
+          "id": "5a5959c4e76e98edf6db072fcdd61bc53d264382f56bda813813c3a068d2d805",
+          "local_addr": "udp://0.0.0.0:6666",
+          "remote_addr": "udp://127.0.0.1:7001",
+          "peer_id": "oboard-mac-2",
+          "state": "Connected",
+          "last_seen": "1770453523000",
+          "quality": 0,
+          "relay": 1,
+          "latency_ms": 0,
+          "latency_history": [0, 0, 0, 0, 0],
+          "packets_sent": 28,
+          "packets_lost": 0,
+          "bytes_sent": "0",
+          "bytes_received": "5079",
+          "last_ping_time": "1770453522000",
+          "bandwidth_mbps": 0.005079,
+          "packet_loss_rate": 0
+        },
+        {
+          "id": "4ecc7c6f2235ca981e3722ef51c3fe78a4b0143d901331e945401b33924c7cfd",
+          "local_addr": "quic://0.0.0.0:6669",
+          "remote_addr": "quic://127.0.0.1:7004",
+          "peer_id": "oboard-mac-2",
+          "state": "Connected",
+          "last_seen": "1770453523000",
+          "quality": 0,
+          "relay": 1,
+          "latency_ms": 0,
+          "latency_history": [0, 0, 0, 0, 0],
+          "packets_sent": 28,
+          "packets_lost": 0,
+          "bytes_sent": "0",
+          "bytes_received": "5321",
+          "last_ping_time": "1770453522000",
+          "bandwidth_mbps": 0.005321,
+          "packet_loss_rate": 0
+        }
+      ]
+    }
+  ],
+  "peers_count": 2,
+  "routes": []
+}

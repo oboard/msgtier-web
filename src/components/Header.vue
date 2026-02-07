@@ -1,21 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
-import { apiUrl, connectionStatus, fetchError } from '../stores/data';
-import { startDataFetching, stopDataFetching } from '../services/dataService';
-
-const urlInput = ref('');
-const isConnected = computed(() => connectionStatus.value === 'connected');
-
-const handleConnect = () => {
-  if (urlInput.value.trim()) {
-    apiUrl.value = urlInput.value.trim();
-    startDataFetching(urlInput.value.trim());
-  }
-};
-
-const handleDisconnect = () => {
-  stopDataFetching();
-};
+import { connectionStatus, fetchError } from '../stores/data';
 </script>
 
 <template>
@@ -31,24 +15,6 @@ const handleDisconnect = () => {
           <h1 class="text-lg font-bold">MsgTier</h1>
           <p class="text-xs opacity-60">Network Monitor</p>
         </div>
-      </div>
-    </div>
-    
-    <div class="navbar-center">
-      <div class="join">
-        <input 
-          type="text" 
-          placeholder="/api" 
-          class="input input-bordered input-sm w-64 join-item focus:outline-none"
-          v-model="urlInput"
-          @keydown.enter="handleConnect"
-        />
-        <button v-if="isConnected" class="btn btn-error btn-sm join-item" @click="handleDisconnect">
-          Disconnect
-        </button>
-        <button v-else class="btn btn-primary btn-sm join-item" @click="handleConnect" :disabled="!urlInput.trim()">
-          Connect
-        </button>
       </div>
     </div>
     

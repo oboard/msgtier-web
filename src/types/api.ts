@@ -3,7 +3,7 @@ export interface Peer {
   version: string;
   metadata: any | null;
   public_key: string;
-  adresses: string[];
+  addresses: string[];
   connections: Connection[];
 }
 
@@ -29,6 +29,8 @@ export interface Connection {
   packets_lost?: number;
   bytes_sent?: string;
   bytes_received?: string;
+  latency_history?: number[];
+  last_ping_time?: string;
 }
 
 export interface Route {

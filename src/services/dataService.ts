@@ -5,15 +5,15 @@ let fetchInterval: number | null = null;
 
 export const startDataFetching = (url: string) => {
   stopDataFetching();
-  
+
   const fetchData = async () => {
     try {
       if (connectionStatus.value !== 'connected') {
         connectionStatus.value = 'loading';
       }
       fetchError.value = null;
-      
-      const response = await fetch(url, {
+
+      const response = await fetch(`${url}/status`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -36,7 +36,7 @@ export const startDataFetching = (url: string) => {
 
   // Initial fetch
   fetchData();
-  
+
   // Set up interval for continuous fetching
   fetchInterval = window.setInterval(fetchData, 1000);
 };

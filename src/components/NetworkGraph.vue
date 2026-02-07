@@ -12,11 +12,14 @@ interface GraphNode extends d3.SimulationNodeDatum {
 }
 
 interface GraphLink extends d3.SimulationLinkDatum<GraphNode> {
+  id: string; // Unique ID for D3 key
   source: string | GraphNode;
   target: string | GraphNode;
   active: boolean;
   bandwidth: number;
   latency: number;
+  remote_addr: string;
+  curvatureOffset: number;
 }
 
 const container = ref<HTMLDivElement | null>(null);
@@ -166,6 +169,7 @@ function initializeGraph() {
   // Create groups in specific order inside the container
   graphGroup.append("g").attr("class", "links");
   graphGroup.append("g").attr("class", "nodes");
+  graphGroup.append("g").attr("class", "link-labels");
   graphGroup.append("g").attr("class", "labels");
 
   // Add Zoom behavior
@@ -187,17 +191,23 @@ function initializeGraph() {
       d3
         .forceLink<GraphNode, GraphLink>()
         .id((d) => d.id)
-        .distance(150),
-    ) // Increased distance
-    .force("charge", d3.forceManyBody().strength(-800)) // Stronger repulsion
+        .distance(600), // Increased distance
+    )
+    .force("charge", d3.forceManyBody().strength(-4000)) // Stronger repulsion
     .force("center", d3.forceCenter(width / 2, height / 2))
+    .force(
+      "radial",
+      d3
+        .forceRadial(300, width / 2, height / 2) // Increased radius to avoid clumping
+        .strength(0.05) // Reduced strength
+    ) // Gentle gravity towards center
     .force(
       "collide",
       d3
         .forceCollide<GraphNode>()
-        .radius((d) => (d.type === "self" ? 35 : 25) + 10)
+        .radius((d) => (d.type === "self" ? 35 : 25) + 400) // Increased collision radius for labels
         .strength(0.7),
-    ); // Prevent overlap
+    );
 
   // Handle window resize
   resizeObserver = new ResizeObserver((entries) => {
@@ -210,10 +220,11 @@ function initializeGraph() {
           .attr("height", height)
           .attr("viewBox", `0 0 ${width} ${height}`);
       }
-      
+
       if (simulation) {
-         simulation.force("center", d3.forceCenter(width / 2, height / 2));
-         simulation.alpha(0.3).restart();
+        simulation.force("center", d3.forceCenter(width / 2, height / 2));
+        simulation.force("radial", d3.forceRadial(300, width / 2, height / 2).strength(0.05));
+        simulation.alpha(0.3).restart();
       }
     }
   });
@@ -221,6 +232,39 @@ function initializeGraph() {
   if (svgContainerElement) {
     resizeObserver.observe(svgContainerElement);
   }
+}
+
+function formatAddress(addr: string): string {
+  if (!addr) return "Unknown";
+
+  // Try to parse multiaddr
+  if (addr.startsWith("/")) {
+    const parts = addr.split("/").filter((p) => p);
+    // Common parts: ['ip4', '1.2.3.4', 'tcp', '8080']
+
+    let ip = "";
+    let port = "";
+    let protocol = "";
+
+    for (let i = 0; i < parts.length; i++) {
+      if (parts[i] === "ip4" || parts[i] === "ip6") {
+        ip = parts[i + 1];
+        i++;
+      } else if (["tcp", "udp", "quic", "ws", "wss"].includes(parts[i])) {
+        protocol = protocol ? `${protocol}/${parts[i]}` : parts[i];
+        if (parts[i + 1] && /^\d+$/.test(parts[i + 1])) {
+          port = parts[i + 1];
+          i++;
+        }
+      }
+    }
+
+    if (ip) {
+      return `${ip}${port ? `:${port}` : ""} ${protocol ? `(${protocol})` : ""}`;
+    }
+  }
+
+  return addr;
 }
 
 function updateGraph(data: ApiResponse) {
@@ -237,6 +281,16 @@ function updateGraph(data: ApiResponse) {
       });
     }
   });
+
+  // Check if topology has changed
+  // Simple check: compare node IDs and link IDs
+  const currentNodeIds = new Set(simulation.nodes().map(n => n.id));
+  const newNodeIds = new Set(data.peers.map(p => p.id));
+  const nodesChanged = currentNodeIds.size !== newNodeIds.size || [...currentNodeIds].some(id => !newNodeIds.has(id));
+
+  // Note: We are regenerating links every time, so link IDs might change if we merge them differently.
+  // But if the underlying data structure is stable, our merge logic should be deterministic.
+  // Let's assume nodes stability is the main factor for "jitter".
 
   // Create nodes and links from the data
   const newNodes: GraphNode[] = data.peers.map((peer) => {
@@ -269,57 +323,155 @@ function updateGraph(data: ApiResponse) {
   });
 
   const newLinks: GraphLink[] = [];
-  const processedLinks = new Set<string>();
+
+  // Group links by source-target pair to calculate curvature
+  const linkGroups = new Map<string, any[]>();
 
   data.peers.forEach((peer) => {
     if (!peer.connections) return;
 
-    peer.connections.forEach((conn) => {
-      // Use sorted IDs to deduplicate undirected edges
-      // If we want to show directionality later, we'd remove the sort
+    peer.connections.forEach((conn, index) => {
       const sourceId = peer.id;
       const targetId = conn.peer_id;
 
       // Skip self-loops if any
       if (sourceId === targetId) return;
 
-      const linkId = [sourceId, targetId].sort().join("-");
+      // Create a key that is consistent regardless of direction if we want to bundle them together
+      // Use a separator that is unlikely to be in the ID (like '|||')
+      const key = [sourceId, targetId].sort().join("|||");
 
-      if (processedLinks.has(linkId)) return;
+      if (!linkGroups.has(key)) {
+        linkGroups.set(key, []);
+      }
 
-      newLinks.push({
+      linkGroups.get(key)!.push({
         source: sourceId,
         target: targetId,
         active: conn.state === "Connected" || conn.active === true,
         bandwidth: conn.bandwidth_mbps || 0,
-        latency: conn.latency_ms || 0,
+        latency: conn.latency_ms || (conn.latency_history?.length ? conn.latency_history[conn.latency_history.length - 1] : 0),
+        remote_addr: conn.remote_addr,
+        id: `${sourceId}-${targetId}-${index}` // Unique ID
       });
+    });
+  });
 
-      processedLinks.add(linkId);
+  // Process groups and assign indices
+  linkGroups.forEach((links, key) => {
+    // Determine canonical source for the pair from the key (e.g., sorted IDs)
+    const [id1, id2] = key.split("|||");
+
+    const forward = links.filter((l) => l.source === id1);
+    const reverse = links.filter((l) => l.source === id2);
+
+    // If bidirectional, merge mirrored connections (simple approximation for now)
+    // Actually, user wants them MERGED into one line if bidirectional.
+    // So if isBidirectional is true, we should merge matching pairs?
+    // Or just merge everything into one line? 
+    // "If it is a bidirectional connection it should be merged into one line"
+    // Let's assume this means: If A->B and B->A exist, show ONE line.
+
+    // Simplification strategy:
+    // If isBidirectional, we take all links and try to pair them up.
+    // However, finding exact pairs (port matching) is complex without local port info on both sides fully available in one context easily.
+    // Let's just group them all and assign curvature.
+
+    // BUT, the user explicitly said "merged into one line".
+    // If we have multiple connections (e.g. TCP + UDP), we should keep them separate?
+    // "Two peer connected... tilt angle... text cannot overlap" -> This implies multiple lines are desired if multiple protocols.
+    // But "If it is a bidirectional connection it should be merged into one line" -> Maybe means for the SAME protocol/connection.
+
+    // Let's try to detect mirrors based on protocol/address if possible, OR just rely on the fact that we have multiple links.
+    // Given the user complaint "still too close" and "merged into one line", maybe they want a simpler graph?
+
+    // Let's stick to the "Right Hand Traffic" but with a modification:
+    // If we detect a mirror (same connection ID logic?), merge them.
+    // The current IDs are like "oboard-mac:tcp://...:tcp://...".
+    // Let's just create distinct links for unique connections.
+
+    // Wait, the user said "If it is a bidirectional connection it should be merged into one line".
+    // This implies 2 links -> 1 link.
+    // So I will combine `forward` and `reverse` lists.
+    // If I have 1 forward and 1 reverse, I output 1 link.
+
+    // Let's try to match them.
+    const mergedLinks: GraphLink[] = [];
+    const processedReverseIndices = new Set<number>();
+
+    forward.forEach(fLink => {
+      // Try to find a matching reverse link
+      // A match is likely same protocol? Or just any available reverse link?
+      // Let's try to match by address if possible, but addresses are inverted.
+      // fLink.remote_addr is B's address. rLink.remote_addr is A's address.
+      // Hard to match exactly without more info.
+      // Let's just greedily match one-to-one.
+
+      const rIndex = reverse.findIndex((r, idx) => !processedReverseIndices.has(idx));
+
+      if (rIndex !== -1) {
+        // Found a match, merge them
+        processedReverseIndices.add(rIndex);
+        const rLink = reverse[rIndex];
+
+        // Create a merged link
+        mergedLinks.push({
+          ...fLink,
+          id: `merged-${fLink.id}-${rLink.id}`, // Combined ID
+          isBidirectional: true,
+          // Sum bandwidth? Average latency?
+          bandwidth: fLink.bandwidth + rLink.bandwidth,
+          latency: (fLink.latency + rLink.latency) / 2,
+          // Display info?
+          remote_addr: `${fLink.remote_addr} <-> ${rLink.remote_addr}` // Maybe too long?
+          // Just keep one address for label or mark as bi-di
+        });
+      } else {
+        // No match, keep as is
+        mergedLinks.push(fLink);
+      }
+    });
+
+    // Add remaining reverse links
+    reverse.forEach((rLink, idx) => {
+      if (!processedReverseIndices.has(idx)) {
+        mergedLinks.push(rLink);
+      }
+    });
+
+    // Now assign offsets to mergedLinks
+    const n = mergedLinks.length;
+    mergedLinks.forEach((link, i) => {
+      const spacing = 60;
+      // Center the group
+      const offset = (i - (n - 1) / 2) * spacing;
+
+      newLinks.push({
+        ...link,
+        curvatureOffset: offset,
+      });
     });
   });
 
   // Select groups
   let linkGroup = graphGroup.select<SVGGElement>(".links");
+  let linkLabelGroup = graphGroup.select<SVGGElement>(".link-labels");
   let nodeGroup = graphGroup.select<SVGGElement>(".nodes");
   let labelGroup = graphGroup.select<SVGGElement>(".labels");
 
-  // Update links
+  // Update links (PATHS instead of LINES)
   const link = linkGroup
-    .selectAll<SVGLineElement, GraphLink>("line")
-    .data(
-      newLinks,
-      (d: any) => `${d.source.id || d.source}-${d.target.id || d.target}`,
-    );
+    .selectAll<SVGPathElement, GraphLink>("path")
+    .data(newLinks, (d) => d.id);
 
   link.exit().remove();
 
-  const linkEnter = link.enter().append("line").attr("stroke-opacity", 0.8);
+  const linkEnter = link.enter().append("path").attr("fill", "none").attr("stroke-opacity", 0.6);
 
   const linkMerge = linkEnter
     .merge(link)
     .attr("stroke", (d) => (d.active ? "#10B981" : "#EF4444"))
-    .attr("stroke-width", (d) => Math.max(1, d.bandwidth * 2))
+    .attr("stroke-width", (d) => Math.max(1.5, d.bandwidth * 2))
     .attr("stroke-dasharray", (d) => (d.active ? null : "4,4")) // Dashed for inactive
     .attr("filter", (d) => (d.active ? "url(#glow)" : null)); // Glow for active
 
@@ -328,8 +480,31 @@ function updateGraph(data: ApiResponse) {
     .append("title")
     .text(
       (d) =>
-        `Bandwidth: ${d.bandwidth.toFixed(3)} Mbps\nLatency: ${d.latency}ms`,
+        `Remote: ${d.remote_addr}\nBandwidth: ${d.bandwidth.toFixed(3)} Mbps\nLatency: ${d.latency}ms`,
     );
+
+  // Update link labels
+  const linkLabel = linkLabelGroup
+    .selectAll<SVGTextElement, GraphLink>("text")
+    .data(newLinks, (d) => d.id);
+
+  linkLabel.exit().remove();
+
+  const linkLabelEnter = linkLabel.enter().append("text")
+    .attr("font-family", "monospace")
+    .attr("font-size", "10px")
+    .attr("fill", "currentColor")
+    .attr("class", "text-base-content/70")
+    .attr("text-anchor", "middle")
+    .attr("dy", "0.3em")
+    .style("paint-order", "stroke")
+    .style("stroke", "oklch(var(--b1))")
+    .style("stroke-width", "3px")
+    .style("stroke-linecap", "round")
+    .style("stroke-linejoin", "round");
+
+  const linkLabelMerge = linkLabelEnter.merge(linkLabel)
+    .text(d => formatAddress(d.remote_addr));
 
   // Update nodes
   const node = nodeGroup
@@ -386,13 +561,25 @@ function updateGraph(data: ApiResponse) {
     .force<d3.ForceLink<GraphNode, GraphLink>>("link")
     ?.links(newLinks);
 
+  // Only restart simulation if nodes have changed to avoid jitter
+  // If only data properties changed (bandwidth, latency), we don't need to restart physics
+  if (nodesChanged) {
+    simulation.alpha(1).restart();
+  } else {
+    // Keep it running gently or just tick once
+    // simulation.alpha(0.1).restart(); 
+    // Actually, if we don't restart, the new data properties (like stroke width) will update in the DOM 
+    // because we called .merge() selection logic below, but positions won't change drastically.
+    // However, we need to ensure the tick function runs if we want continuous updates?
+    // D3 force simulation stops when alpha reaches alphaMin.
+    // If we want to keep it "alive" but stable, we can set a low target alpha.
+    // But better: just don't restart aggressively.
+    simulation.alpha(0.1).restart();
+  }
+
   simulation.on("tick", () => {
     // Clamp nodes to canvas bounds with padding
     newNodes.forEach((d) => {
-      // Skip clamping for fixed nodes (like self node) if desired,
-      // but here we ensure everything stays in bounds.
-      // Self node is fixed at center, so it should be fine.
-
       const r = d.type === "self" ? 25 : 18;
       const padding = 20;
 
@@ -404,11 +591,69 @@ function updateGraph(data: ApiResponse) {
       }
     });
 
-    linkMerge
-      .attr("x1", (d) => (d.source as GraphNode).x!)
-      .attr("y1", (d) => (d.source as GraphNode).y!)
-      .attr("x2", (d) => (d.target as GraphNode).x!)
-      .attr("y2", (d) => (d.target as GraphNode).y!);
+    // Update curved paths
+    linkMerge.attr("d", (d) => {
+      const source = d.source as GraphNode;
+      const target = d.target as GraphNode;
+
+      if (!source.x || !source.y || !target.x || !target.y) return "";
+
+      const dx = target.x - source.x;
+      const dy = target.y - source.y;
+
+      const mx = (source.x + target.x) / 2;
+      const my = (source.y + target.y) / 2;
+
+      const len = Math.sqrt(dx * dx + dy * dy);
+      if (len === 0) return "";
+
+      // Normal vector
+      const nx = -dy / len;
+      const ny = dx / len;
+
+      // Use pre-calculated offset
+      const offset = d.curvatureOffset;
+
+      const cx = mx + nx * offset;
+      const cy = my + ny * offset;
+
+      return `M${source.x},${source.y} Q${cx},${cy} ${target.x},${target.y}`;
+    });
+
+    // Update link labels position and rotation
+    linkLabelMerge.attr("transform", (d) => {
+      const source = d.source as GraphNode;
+      const target = d.target as GraphNode;
+      if (!source.x || !source.y || !target.x || !target.y) return "";
+
+      const dx = target.x - source.x;
+      const dy = target.y - source.y;
+      const mx = (source.x + target.x) / 2;
+      const my = (source.y + target.y) / 2;
+      const len = Math.sqrt(dx * dx + dy * dy);
+      if (len === 0) return "";
+
+      const nx = -dy / len;
+      const ny = dx / len;
+
+      // Use pre-calculated offset
+      const offset = d.curvatureOffset;
+
+      const cx = mx + nx * offset;
+      const cy = my + ny * offset;
+
+      const curveX = (mx + cx) / 2;
+      const curveY = (my + cy) / 2;
+
+      // Calculate angle
+      let angle = Math.atan2(dy, dx) * 180 / Math.PI;
+      // Flip if reading backwards
+      if (angle > 90 || angle < -90) {
+        angle += 180;
+      }
+
+      return `translate(${curveX}, ${curveY}) rotate(${angle})`;
+    });
 
     nodeMerge.attr("cx", (d) => d.x!).attr("cy", (d) => d.y!);
 

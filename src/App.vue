@@ -1,11 +1,17 @@
 <script setup lang="ts">
+import { onMounted } from "vue";
 import Header from "./components/Header.vue";
 import StatsCards from "./components/StatsCards.vue";
 import NetworkGraph from "./components/NetworkGraph.vue";
 import ConnectionsTable from "./components/ConnectionsTable.vue";
 import RoutesTable from "./components/RoutesTable.vue";
 import BandwidthChart from "./components/BandwidthChart.vue";
-import { apiData } from "./stores/data";
+import { apiData, apiUrl } from "./stores/data";
+import { startDataFetching } from "./services/dataService";
+
+onMounted(() => {
+  startDataFetching(apiUrl.value);
+});
 </script>
 
 <template>
@@ -32,17 +38,10 @@ import { apiData } from "./stores/data";
         <div class="hero min-h-96 bg-base-200 rounded-2xl">
           <div class="hero-content text-center">
             <div class="max-w-md">
-              <h1 class="text-5xl font-bold">🚀</h1>
-              <h1 class="text-3xl font-bold">Welcome to MsgTier WebUI</h1>
-              <p class="py-6">
-                Enter a URL above and click Connect to start monitoring your
-                network connections in real-time.
+              <span class="loading loading-spinner loading-lg text-primary"></span>
+              <p class="py-6 text-base-content/70">
+                Connecting to {{ apiUrl }}...
               </p>
-              <div class="flex justify-center space-x-4">
-                <div class="badge badge-outline">Real-time Updates</div>
-                <div class="badge badge-outline">D3.js Visualizations</div>
-                <div class="badge badge-outline">Network Monitoring</div>
-              </div>
             </div>
           </div>
         </div>

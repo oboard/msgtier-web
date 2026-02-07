@@ -9,6 +9,10 @@ const connections = computed(() => {
          [];
 });
 
+function getLatency(c: any): number | undefined {
+  return c.latency_ms || (c.latency_history?.length ? c.latency_history[c.latency_history.length - 1] : undefined);
+}
+
 function formatLatency(ms: number | undefined): string {
   if (ms === undefined) return "-";
   return `${ms.toFixed(1)}ms`;
@@ -60,8 +64,8 @@ function formatPacketLoss(rate: number | undefined): string {
               <td class="font-mono text-sm">{{ connection.remote_addr }}</td>
               <td>
                 <div class="flex items-center space-x-2">
-                  <span>{{ connection.latency_display || formatLatency(connection.latency_ms) }}</span>
-                  <div v-if="connection.latency_ms && connection.latency_ms > 100" class="badge badge-warning badge-xs">High</div>
+                  <span>{{ connection.latency_display || formatLatency(getLatency(connection)) }}</span>
+                  <div v-if="getLatency(connection) && getLatency(connection)! > 100" class="badge badge-warning badge-xs">High</div>
                 </div>
               </td>
               <td>

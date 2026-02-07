@@ -19,9 +19,15 @@ const totalBandwidth = computed(() =>
   connections.value.reduce((sum, c) => sum + (c.bandwidth_mbps || 0), 0) || 0
 );
 
-const avgLatency = computed(() => 
-  connections.value.filter(c => c.latency_ms).reduce((sum, c, _, arr) => sum + (c.latency_ms || 0) / arr.length, 0) || 0
-);
+const avgLatency = computed(() => {
+  const validConnections = connections.value.filter(c => c.latency_ms || (c.latency_history && c.latency_history.length > 0));
+  if (validConnections.length === 0) return 0;
+  
+  return validConnections.reduce((sum, c) => {
+    const latency = c.latency_ms || (c.latency_history && c.latency_history.length > 0 ? c.latency_history[c.latency_history.length - 1] : 0);
+    return sum + latency;
+  }, 0) / validConnections.length;
+});
 </script>
 
 <template>
