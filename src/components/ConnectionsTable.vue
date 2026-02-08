@@ -33,17 +33,11 @@ function formatPacketLoss(rate: number | undefined): string {
 <template>
   <div class="card bg-base-100 shadow-sm border border-base-300 rounded-box">
     <div class="card-body p-0">
-      <div class="p-4 border-b border-base-300 flex justify-between items-center">
-        <h2 class="card-title text-base-content/80">Active Connections</h2>
-        <div class="badge badge-neutral">{{ connections.length }}</div>
-      </div>
-
       <div class="overflow-x-auto">
         <table class="table table-zebra w-full">
           <thead class="bg-base-200/50">
             <tr>
               <th>Peer ID</th>
-              <th>Status</th>
               <th>Remote Address</th>
               <th>Latency</th>
               <th>Bandwidth</th>
@@ -53,14 +47,6 @@ function formatPacketLoss(rate: number | undefined): string {
           <tbody>
             <tr v-for="(connection, i) in connections" :key="`${connection.peer_id}-${connection.remote_addr}-${i}`" class="hover">
               <td class="font-mono text-sm">{{ connection.peer_id }}</td>
-              <td>
-                <div class="badge badge-sm" :class="{
-                  'badge-success': connection.state === 'Connected' || connection.active,
-                  'badge-error': !(connection.state === 'Connected' || connection.active)
-                }">
-                  {{ connection.state || (connection.active ? "Active" : "Inactive") }}
-                </div>
-              </td>
               <td class="font-mono text-sm">{{ connection.remote_addr }}</td>
               <td>
                 <div class="flex items-center space-x-2">

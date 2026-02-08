@@ -11,10 +11,6 @@ const connections = computed(() => {
          [];
 });
 
-const activePeers = computed(() => 
-  connections.value.filter(c => c.state === 'Connected' || c.active).length || 0
-);
-
 const totalBandwidth = computed(() => 
   connections.value.reduce((sum, c) => sum + (c.bandwidth_mbps || 0), 0) || 0
 );
@@ -43,19 +39,6 @@ const avgLatency = computed(() => {
       <div class="stat-title text-base-content/60">Total Peers</div>
       <div class="stat-value text-primary text-3xl">{{ data?.peers_count || 0 }}</div>
       <div class="stat-desc">Connected nodes</div>
-    </div>
-
-    <div class="stat bg-base-100 shadow-sm border border-base-300 rounded-box">
-      <div class="stat-figure text-success">
-        <div class="p-2 bg-success/10 rounded-lg">
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="w-6 h-6 stroke-current">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4"></path>
-          </svg>
-        </div>
-      </div>
-      <div class="stat-title text-base-content/60">Active Connections</div>
-      <div class="stat-value text-success text-3xl">{{ activePeers }}</div>
-      <div class="stat-desc">Live connections</div>
     </div>
 
     <div class="stat bg-base-100 shadow-sm border border-base-300 rounded-box">

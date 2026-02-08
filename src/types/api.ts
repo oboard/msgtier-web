@@ -10,8 +10,7 @@ export interface Peer {
 export interface Connection {
   peer_id: string;
   version?: string;
-  active?: boolean;
-  state?: string;
+  // active and state are removed in new structure
   relay: number;
   local_addr: string;
   remote_addr: string;
@@ -31,6 +30,7 @@ export interface Connection {
   bytes_received?: string;
   latency_history?: number[];
   last_ping_time?: string;
+  nat_type?: string;
 }
 
 export interface Route {
