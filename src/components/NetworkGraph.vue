@@ -8,6 +8,7 @@ interface GraphNode extends d3.SimulationNodeDatum {
   id: string;
   name: string;
   type: "self" | "peer";
+  ips: string[];
 }
 
 interface GraphLink extends d3.SimulationLinkDatum<GraphNode> {
@@ -17,8 +18,12 @@ interface GraphLink extends d3.SimulationLinkDatum<GraphNode> {
   bandwidth: number;
   latency: number;
   remote_addr: string;
+  local_addr?: string;
   curvatureOffset: number;
   isBidirectional?: boolean;
+  protocol?: string;
+  port?: string;
+  local_port?: string;
 }
 
 const container = ref<HTMLDivElement | null>(null);
@@ -176,19 +181,19 @@ function initializeGraph() {
         .id((d) => d.id)
         .distance(600), // Increased distance
     )
-    .force("charge", d3.forceManyBody().strength(-4000)) // Stronger repulsion
+    // .force("charge", d3.forceManyBody().strength(-4000)) // Stronger repulsion
     .force("center", d3.forceCenter(width / 2, height / 2))
-    .force(
-      "radial",
-      d3
-        .forceRadial(300, width / 2, height / 2) // Increased radius to avoid clumping
-        .strength(0.05) // Reduced strength
-    ) // Gentle gravity towards center
+    // .force(
+    //   "radial",
+    //   d3
+    //     .forceRadial(100, width / 2, height / 2) // Increased radius to avoid clumping
+    //     .strength(0.05) // Reduced strength
+    // ) // Gentle gravity towards center
     .force(
       "collide",
       d3
         .forceCollide<GraphNode>()
-        .radius((d) => (d.type === "self" ? 35 : 25) + 400) // Increased collision radius for labels
+        .radius((d) => (d.type === "self" ? 35 : 25) + 100) // Increased collision radius for labels
         .strength(0.7),
     );
 
@@ -217,23 +222,49 @@ function initializeGraph() {
   }
 }
 
-function formatAddress(addr: string): string {
-  if (!addr) return "Unknown";
+function simplifyProtocol(p: string): string {
+  if (!p) return "";
+  const upper = p.toUpperCase();
+  if (upper.includes("WSS")) return "WSS";
+  if (upper.includes("WS")) return "WS";
+  if (upper.includes("QUIC")) return "QUIC";
+  if (upper.includes("P2P")) return "P2P";
+  if (upper.includes("TCP")) return "TCP";
+  if (upper.includes("UDP")) return "UDP";
+  return upper.split('/')[0];
+}
+
+function getProtocolColor(protocol: string): string {
+  const p = simplifyProtocol(protocol).toLowerCase();
+  switch (p) {
+    case 'tcp': return '#3B82F6'; // blue-500
+    case 'udp': return '#F59E0B'; // amber-500
+    case 'quic': return '#8B5CF6'; // violet-500
+    case 'ws': return '#10B981'; // emerald-500
+    case 'wss': return '#059669'; // emerald-600
+    case 'http': return '#14B8A6'; // teal-500
+    case 'p2p': return '#EC4899'; // pink-500
+    default: return '#9CA3AF';
+  }
+}
+
+function parseAddress(addr: string): { ip: string, port: string, protocol: string } {
+  let ip = "";
+  let port = "";
+  let protocol = "";
+
+  if (!addr) return { ip: "Unknown", port: "", protocol: "" };
 
   // Try to parse multiaddr
   if (addr.startsWith("/")) {
     const parts = addr.split("/").filter((p) => p);
     // Common parts: ['ip4', '1.2.3.4', 'tcp', '8080']
 
-    let ip = "";
-    let port = "";
-    let protocol = "";
-
     for (let i = 0; i < parts.length; i++) {
       if (parts[i] === "ip4" || parts[i] === "ip6") {
         ip = parts[i + 1];
         i++;
-      } else if (["tcp", "udp", "quic", "ws", "wss"].includes(parts[i])) {
+      } else if (["tcp", "udp", "quic", "ws", "wss", "p2p-circuit"].includes(parts[i])) {
         protocol = protocol ? `${protocol}/${parts[i]}` : parts[i];
         if (parts[i + 1] && /^\d+$/.test(parts[i + 1])) {
           port = parts[i + 1];
@@ -242,12 +273,60 @@ function formatAddress(addr: string): string {
       }
     }
 
-    if (ip) {
-      return `${ip}${port ? `:${port}` : ""} ${protocol ? `(${protocol})` : ""}`;
+    // Fallback if IP not found but other parts exist (e.g. dns)
+    if (!ip && parts.length > 0) {
+      // Just take the value after the first key if it looks like an address/domain
+      if (!['tcp', 'udp', 'quic', 'ws', 'wss', 'p2p-circuit'].includes(parts[0])) {
+        ip = parts[1] || parts[0];
+      }
     }
+  } else if (addr.includes("://")) {
+    const parts = addr.split("://");
+    protocol = parts[0];
+    const remainder = parts[1];
+
+    // Handle IPv6 brackets if present
+    const lastColonIndex = remainder.lastIndexOf(":");
+    // Simple check: if last colon is after the last bracket (if any)
+    const lastBracketIndex = remainder.lastIndexOf("]");
+
+    if (lastColonIndex !== -1 && lastColonIndex > lastBracketIndex) {
+      port = remainder.substring(lastColonIndex + 1);
+      ip = remainder.substring(0, lastColonIndex);
+      // remove brackets if ipv6
+      if (ip.startsWith("[") && ip.endsWith("]")) {
+        ip = ip.slice(1, -1);
+      }
+    } else {
+      ip = remainder;
+    }
+  } else {
+    ip = addr;
   }
 
+  return { ip, port, protocol: protocol.toUpperCase() };
+}
+
+function formatAddress(addr: string): string {
+  const { ip, port, protocol } = parseAddress(addr);
+  if (ip) {
+    return `${ip}${port ? `:${port}` : ""} ${protocol ? `(${protocol})` : ""}`;
+  }
   return addr;
+}
+
+function truncateId(id: string): string {
+  if (id.length <= 12) return id;
+  return id.substring(0, 6) + "..." + id.substring(id.length - 4);
+}
+
+function getIconPath(type: "self" | "peer"): string {
+  if (type === "self") {
+    // Home icon
+    return "M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z";
+  }
+  // Server/Desktop icon
+  return "M20 18c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z";
 }
 
 function updateGraph(data: ApiResponse) {
@@ -282,6 +361,7 @@ function updateGraph(data: ApiResponse) {
       id: peer.id,
       name: peer.id,
       type: isSelf ? "self" : "peer",
+      ips: peer.addresses ? peer.addresses.map(addr => parseAddress(addr).ip).filter((ip, i, arr) => arr.indexOf(ip) === i && ip !== "Unknown") : [],
       // Fix self node in the center
       fx: isSelf ? width / 2 : undefined,
       fy: isSelf ? height / 2 : undefined,
@@ -318,13 +398,19 @@ function updateGraph(data: ApiResponse) {
       // Skip self-loops
       if (sourceId === targetId) return;
 
+      const parsed = parseAddress(conn.remote_addr);
+      const parsedLocal = parseAddress(conn.local_addr || "");
       const linkData = {
         source: sourceId,
         target: targetId,
         bandwidth: conn.bandwidth_mbps || 0,
         latency: conn.latency_ms || (conn.latency_history?.length ? conn.latency_history[conn.latency_history.length - 1] : 0),
         remote_addr: conn.remote_addr,
-        id: conn.id, 
+        local_addr: conn.local_addr,
+        protocol: parsed.protocol,
+        port: parsed.port,
+        local_port: parsedLocal.port,
+        id: conn.id,
         originalIndex: index
       };
 
@@ -360,11 +446,12 @@ function updateGraph(data: ApiResponse) {
         isBidirectional: true,
         bandwidth: totalBandwidth,
         latency: avgLatency,
-        // For address, just show "Bidirectional" or keep one? 
-        // User data shows different protocols/ports potentially, simpler to show it's a paired connection.
-        // Or we can try to show both? Let's stick to a cleaner label or the first one.
-        // Let's combine unique remote addresses if they differ significantly, otherwise just show one.
         remote_addr: links.map(l => l.remote_addr).join(" ↔ "),
+        // Keep protocol/port from base link or maybe show mixed?
+        // Let's keep it simple for now
+        protocol: baseLink.protocol,
+        port: baseLink.port,
+        local_port: baseLink.local_port,
         curvatureOffset: 0
       });
     } else {
@@ -440,7 +527,7 @@ function updateGraph(data: ApiResponse) {
 
   const linkMerge = linkEnter
     .merge(link)
-    .attr("stroke", "#10B981") // Always active color
+    .attr("stroke", (d) => getProtocolColor(d.protocol || 'TCP')) // Color by protocol
     .attr("stroke-width", (d) => Math.max(1.5, d.bandwidth * 2))
     .attr("filter", "url(#glow)"); // Always glow
 
@@ -454,48 +541,119 @@ function updateGraph(data: ApiResponse) {
 
   // Update link labels
   const linkLabel = linkLabelGroup
-    .selectAll<SVGTextElement, GraphLink>("text")
+    .selectAll<SVGGElement, GraphLink>("g")
     .data(newLinks, (d) => d.id);
 
   linkLabel.exit().remove();
 
-  const linkLabelEnter = linkLabel.enter().append("text")
+  const linkLabelEnter = linkLabel.enter().append("g")
+    .attr("class", "link-label-group");
+
+  // Protocol Label Background (Rect)
+  linkLabelEnter.append("rect")
+    .attr("class", "proto-bg")
+    .attr("rx", 4)
+    .attr("ry", 4)
+    .attr("fill", "oklch(var(--b1))")
+    .attr("stroke", "currentColor")
+    .attr("stroke-width", 1)
+    .attr("opacity", 0.9);
+
+  // Protocol Text
+  linkLabelEnter.append("text")
+    .attr("class", "proto-text")
     .attr("font-family", "monospace")
     .attr("font-size", "10px")
     .attr("fill", "currentColor")
-    .attr("class", "text-base-content/70")
     .attr("text-anchor", "middle")
     .attr("dy", "0.3em")
-    .style("paint-order", "stroke")
-    .style("stroke", "oklch(var(--b1))")
-    .style("stroke-width", "3px")
-    .style("stroke-linecap", "round")
-    .style("stroke-linejoin", "round");
+    .attr("font-weight", "bold");
 
-  const linkLabelMerge = linkLabelEnter.merge(linkLabel)
-    .text(d => formatAddress(d.remote_addr));
+  // Source Port Text
+  linkLabelEnter.append("text")
+    .attr("class", "port-src")
+    .attr("font-family", "monospace")
+    .attr("font-size", "9px")
+    .attr("fill", "currentColor")
+    .attr("opacity", 0.8)
+    .attr("text-anchor", "middle")
+    .attr("dy", "0.3em");
+
+  // Target Port Text
+  linkLabelEnter.append("text")
+    .attr("class", "port-dst")
+    .attr("font-family", "monospace")
+    .attr("font-size", "9px")
+    .attr("fill", "currentColor")
+    .attr("opacity", 0.8)
+    .attr("text-anchor", "middle")
+    .attr("dy", "0.3em");
+
+  const linkLabelMerge = linkLabelEnter.merge(linkLabel);
+
+  linkLabelMerge.select(".proto-text")
+    .text(d => simplifyProtocol(d.protocol || ''))
+    .style("fill", d => getProtocolColor(d.protocol || ''));
+
+  linkLabelMerge.select(".proto-bg")
+    .style("stroke", d => getProtocolColor(d.protocol || ''));
+
+  linkLabelMerge.select(".port-src")
+    .text(d => d.local_port || '');
+
+  linkLabelMerge.select(".port-dst")
+    .text(d => d.port || '');
+
+  // Calculate rect size based on text length (approximate)
+  linkLabelMerge.each(function (d) {
+    const group = d3.select(this);
+    const text = simplifyProtocol(d.protocol || '');
+    const width = text.length * 7 + 10; // Approx width
+    group.select(".proto-bg")
+      .attr("width", width)
+      .attr("height", 16)
+      .attr("x", -width / 2)
+      .attr("y", -8);
+  });
+
 
   // Update nodes
   const node = nodeGroup
-    .selectAll<SVGCircleElement, GraphNode>("circle")
+    .selectAll<SVGGElement, GraphNode>("g")
     .data(newNodes, (d) => d.id);
 
   node.exit().remove();
 
   const nodeEnter = node
     .enter()
-    .append("circle")
+    .append("g")
+    .attr("class", "node-group");
+
+  nodeEnter.append("circle")
     .attr("stroke", "#ffffff")
     .attr("stroke-width", 2);
 
-  const nodeMerge = nodeEnter
-    .merge(node)
+  nodeEnter.append("path")
+    .attr("fill", "white")
+    .attr("d", d => getIconPath(d.type))
+    .attr("transform", "translate(-12, -12) scale(1)"); // Center the 24x24 icon
+
+  const nodeMerge = nodeEnter.merge(node);
+
+  nodeMerge.select("circle")
     .attr("r", (d) => (d.type === "self" ? 25 : 18)) // Increased size
     .attr("fill", (d) => {
       if (d.type === "self") return "url(#grad-self)";
       return "url(#grad-active)";
     })
     .attr("filter", "url(#glow)"); // Always glow
+
+  nodeMerge.select("path")
+    .attr("transform", d => {
+      const scale = d.type === "self" ? 1.2 : 0.8;
+      const offset = d.type === "self" ? -14 : -10;
+      return `translate(${offset}, ${offset}) scale(${scale})`;
+    });
 
   nodeMerge.select("title").remove();
   nodeMerge
@@ -506,21 +664,75 @@ function updateGraph(data: ApiResponse) {
 
   // Update labels
   const label = labelGroup
-    .selectAll<SVGTextElement, GraphNode>("text")
+    .selectAll<SVGGElement, GraphNode>("g")
     .data(newNodes, (d) => d.id);
 
   label.exit().remove();
 
   const labelEnter = label
     .enter()
-    .append("text")
+    .append("g")
+    .attr("class", "label-group");
+
+  // Label Background (Rect)
+  labelEnter.append("rect")
+    .attr("class", "label-bg")
+    .attr("rx", 6)
+    .attr("ry", 6)
+    .attr("fill", "oklch(var(--b1))")
+    .attr("stroke", "currentColor")
+    .attr("stroke-width", 1)
+    .attr("opacity", 0.9);
+
+  labelEnter.append("text")
     .attr("font-size", "12px")
     .attr("fill", "currentColor")
     .attr("class", "text-base-content fill-current")
     .attr("text-anchor", "middle")
-    .attr("dy", "2.5em"); // Moved below the node
+    .attr("dy", "0em");
 
-  const labelMerge = labelEnter.merge(label).text((d) => d.name);
+  const labelMerge = labelEnter.merge(label);
+
+  // Update text content
+  const textSel = labelMerge.select("text");
+  textSel.text(null);
+
+  textSel.each(function (d) {
+    const el = d3.select(this);
+    // Peer ID
+    el.append("tspan")
+      .attr("x", 0)
+      .attr("dy", "1.2em")
+      .attr("font-weight", "bold")
+      .text(truncateId(d.name));
+
+    // IPs
+    d.ips.forEach((ip) => {
+      el.append("tspan")
+        .attr("x", 0)
+        .attr("dy", "1.2em")
+        .attr("font-size", "10px")
+        .attr("class", "opacity-70")
+        .text(ip);
+    });
+  });
+
+  // Resize rect based on text
+  labelMerge.each(function (d) {
+    const group = d3.select(this);
+    const textEl = group.select("text").node() as SVGTextElement;
+    if (textEl) {
+      const bbox = textEl.getBBox();
+      const paddingX = 10;
+      const paddingY = 6;
+
+      group.select("rect")
+        .attr("x", bbox.x - paddingX)
+        .attr("y", bbox.y - paddingY)
+        .attr("width", bbox.width + paddingX * 2)
+        .attr("height", bbox.height + paddingY * 2);
+    }
+  });
 
   // Update simulation
   simulation.nodes(newNodes);
@@ -618,15 +830,16 @@ function updateGraph(data: ApiResponse) {
     });
 
     // Update link labels position and rotation
-    linkLabelMerge.attr("transform", (d) => {
+    linkLabelMerge.each(function (d) {
+      const group = d3.select(this);
       const source = d.source as GraphNode;
       const target = d.target as GraphNode;
-      if (!source.x || !source.y || !target.x || !target.y) return "";
+      if (!source.x || !source.y || !target.x || !target.y) return;
 
       const dx = target.x - source.x;
       const dy = target.y - source.y;
       const len = Math.sqrt(dx * dx + dy * dy);
-      if (len === 0) return "";
+      if (len === 0) return;
 
       const mx = (source.x + target.x) / 2;
       const my = (source.y + target.y) / 2;
@@ -670,13 +883,12 @@ function updateGraph(data: ApiResponse) {
         ty += (dyTC / lenTC) * targetR;
       }
 
-      // Calculate midpoint of the NEW path start/end
-      const newMx = (sx + tx) / 2;
-      const newMy = (sy + ty) / 2;
-
-      // Curve midpoint at t=0.5
-      const curveX = (newMx + cx) / 2;
-      const curveY = (newMy + cy) / 2;
+      // Curve midpoint at t=0.5 (Quadratic Bezier)
+      // B(t) = (1-t)^2 P0 + 2(1-t)t P1 + t^2 P2
+      // t = 0.5
+      // B(0.5) = 0.25 P0 + 0.5 P1 + 0.25 P2
+      const curveX = 0.25 * sx + 0.5 * cx + 0.25 * tx;
+      const curveY = 0.25 * sy + 0.5 * cy + 0.25 * ty;
 
       // Calculate angle
       let angle = Math.atan2(dy, dx) * 180 / Math.PI;
@@ -685,12 +897,67 @@ function updateGraph(data: ApiResponse) {
         angle += 180;
       }
 
-      return `translate(${curveX}, ${curveY}) rotate(${angle})`;
+      // Update group transform for the central part
+      // We'll apply the rotation to the whole group, but we need to position the ports relative to this rotated frame
+      // Actually, it's easier to position everything absolutely if we don't rotate the whole group?
+      // But rotation matches the line direction.
+      // Let's rotate the whole group around the midpoint.
+
+      group.attr("transform", `translate(${curveX}, ${curveY}) rotate(${angle})`);
+
+      // Now calculate positions for ports relative to the midpoint (0,0) in the rotated frame.
+      // The distance from midpoint to start/end is roughly half the path length.
+      // But since it's a curve, it's not exactly linear distance.
+      // However, for visualization, placing them at fixed offsets from center might be enough?
+      // No, connection lengths vary wildy.
+
+      // Calculate distance from curve midpoint to start/end in the unrotated frame
+      const distStart = Math.sqrt(Math.pow(sx - curveX, 2) + Math.pow(sy - curveY, 2));
+      const distEnd = Math.sqrt(Math.pow(tx - curveX, 2) + Math.pow(ty - curveY, 2));
+
+      // We want ports to be slightly inwards from the ends.
+      // In the rotated frame, the line is roughly horizontal along X axis.
+      // Source is at negative X, Target is at positive X (or vice versa depending on rotation).
+      // Angle logic: atan2(dy, dx) means 0 deg is +X.
+      // If we didn't flip angle: Source is left (-X), Target is right (+X).
+      // If we flipped angle (added 180): Source is right (+X), Target is left (-X).
+
+      const flipped = (Math.atan2(dy, dx) * 180 / Math.PI) > 90 || (Math.atan2(dy, dx) * 180 / Math.PI) < -90;
+
+      // Adjust offsets
+      // We want to place text immediately next to the protocol label (center)
+      const text = simplifyProtocol(d.protocol || '');
+      const protoWidth = text.length * 7 + 10;
+      const halfWidth = protoWidth / 2;
+      const gap = 4;
+
+      if (flipped) {
+        // Flipped: +X is Source side, -X is Target side
+        group.select(".port-src")
+          .attr("x", halfWidth + gap)
+          .attr("text-anchor", "start");
+
+        group.select(".port-dst")
+          .attr("x", -(halfWidth + gap))
+          .attr("text-anchor", "end");
+      } else {
+        // Normal: -X is Source side, +X is Target side
+        group.select(".port-src")
+          .attr("x", -(halfWidth + gap))
+          .attr("text-anchor", "end");
+
+        group.select(".port-dst")
+          .attr("x", halfWidth + gap)
+          .attr("text-anchor", "start");
+      }
     });
 
-    nodeMerge.attr("cx", (d) => d.x!).attr("cy", (d) => d.y!);
+    nodeMerge.attr("transform", (d) => `translate(${d.x!}, ${d.y!})`);
 
-    labelMerge.attr("x", (d) => d.x!).attr("y", (d) => d.y!);
+    labelMerge.attr("transform", (d) => {
+      // Offset the label group downwards to appear below the node
+      return `translate(${d.x!}, ${d.y! + 30})`;
+    });
   });
 
   // Only restart alpha if significant changes or first run, otherwise keep it warm
