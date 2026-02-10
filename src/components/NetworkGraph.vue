@@ -128,7 +128,7 @@ function initializeGraph() {
   selfGradient
     .append("stop")
     .attr("offset", "0%")
-    .attr("stop-color", "var(--color-primary)"); 
+    .attr("stop-color", "var(--color-primary)");
   selfGradient
     .append("stop")
     .attr("offset", "100%")
@@ -144,7 +144,7 @@ function initializeGraph() {
   activeGradient
     .append("stop")
     .attr("offset", "0%")
-    .attr("stop-color", "var(--color-success)"); 
+    .attr("stop-color", "var(--color-success)");
   activeGradient
     .append("stop")
     .attr("offset", "100%")
@@ -184,22 +184,16 @@ function initializeGraph() {
       d3
         .forceLink<GraphNode, GraphLink>()
         .id((d) => d.id)
-        .distance(600), // Increased distance
+        .distance(300) // Increased distance
     )
-    // .force("charge", d3.forceManyBody().strength(-4000)) // Stronger repulsion
-    .force("center", d3.forceCenter(width / 2, height / 2))
-    // .force(
-    //   "radial",
-    //   d3
-    //     .forceRadial(100, width / 2, height / 2) // Increased radius to avoid clumping
-    //     .strength(0.05) // Reduced strength
-    // ) // Gentle gravity towards center
+    .force("charge", d3.forceManyBody().strength(-800)) // Stronger repulsion
+    // .force("center", d3.forceCenter(width / 2, height / 2)) // Removed center force as Self node is fixed
     .force(
       "collide",
       d3
         .forceCollide<GraphNode>()
-        .radius((d) => (d.type === "self" ? 35 : 25) + 100) // Increased collision radius for labels
-        .strength(0.7),
+        .radius((d) => (d.type === "self" ? 40 : 30) + 10)
+        .strength(0.7)
     );
 
   // Handle window resize
@@ -215,8 +209,7 @@ function initializeGraph() {
       }
 
       if (simulation) {
-        simulation.force("center", d3.forceCenter(width / 2, height / 2));
-        simulation.force("radial", d3.forceRadial(300, width / 2, height / 2).strength(0.05));
+        // simulation.force("center", d3.forceCenter(width / 2, height / 2)); // Removed center update
         simulation.alpha(0.3).restart();
       }
     }
@@ -334,57 +327,72 @@ function getIconPath(type: "self" | "peer"): string {
   return "M20 18c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z";
 }
 
+function drag(simulation: d3.Simulation<GraphNode, GraphLink>) {
+  function dragstarted(event: d3.D3DragEvent<SVGGElement, GraphNode, GraphNode>, d: GraphNode) {
+    if (d.type === "self") return; // Prevent dragging self node
+    if (!event.active) simulation.alphaTarget(0.3).restart();
+    d.fx = d.x;
+    d.fy = d.y;
+  }
+
+  function dragged(event: d3.D3DragEvent<SVGGElement, GraphNode, GraphNode>, d: GraphNode) {
+    if (d.type === "self") return;
+    d.fx = event.x;
+    d.fy = event.y;
+  }
+
+  function dragended(event: d3.D3DragEvent<SVGGElement, GraphNode, GraphNode>, d: GraphNode) {
+    if (d.type === "self") return;
+    if (!event.active) simulation.alphaTarget(0);
+    d.fx = null;
+    d.fy = null;
+  }
+
+  return d3.drag<SVGGElement, GraphNode>()
+    .filter((event, d) => d.type !== "self") // Disable drag initiation for self node
+    .on("start", dragstarted)
+    .on("drag", dragged)
+    .on("end", dragended);
+}
+
 function updateGraph(data: ApiResponse) {
   if (!svg || !simulation || !graphGroup) return;
 
-  // Save current positions
-  simulation.nodes().forEach((node) => {
-    if (node.x !== undefined && node.y !== undefined) {
-      nodePositions.set(node.id, {
-        x: node.x,
-        y: node.y,
-        vx: node.vx || 0,
-        vy: node.vy || 0,
-      });
-    }
-  });
+  // Map existing nodes for reuse
+  const currentNodesMap = new Map(simulation.nodes().map(n => [n.id, n]));
 
   // Check if topology has changed
-  // Simple check: compare node IDs and link IDs
   const currentNodeIds = new Set(simulation.nodes().map(n => n.id));
   const newNodeIds = new Set(data.peers.map(p => p.id));
   const nodesChanged = currentNodeIds.size !== newNodeIds.size || [...currentNodeIds].some(id => !newNodeIds.has(id));
 
-  // Note: We are regenerating links every time, so link IDs might change if we merge them differently.
-  // But if the underlying data structure is stable, our merge logic should be deterministic.
-  // Let's assume nodes stability is the main factor for "jitter".
-
-  // Create nodes and links from the data
+  // Create nodes, reusing existing objects to preserve D3 state
   const newNodes: GraphNode[] = data.peers.map((peer) => {
+    const existing = currentNodesMap.get(peer.id);
     const isSelf = peer.id === data.peer_id;
+    const ips = peer.addresses ? peer.addresses.map(addr => parseAddress(addr).ip).filter((ip, i, arr) => arr.indexOf(ip) === i && ip !== "Unknown") : [];
+
+    if (existing) {
+      existing.name = peer.id;
+      existing.type = isSelf ? "self" : "peer";
+      existing.ips = ips;
+      if (isSelf) {
+        existing.fx = width / 2;
+        existing.fy = height / 2;
+      }
+      return existing;
+    }
+
     return {
       id: peer.id,
       name: peer.id,
       type: isSelf ? "self" : "peer",
-      ips: peer.addresses ? peer.addresses.map(addr => parseAddress(addr).ip).filter((ip, i, arr) => arr.indexOf(ip) === i && ip !== "Unknown") : [],
-      // Fix self node in the center
+      ips: ips,
+      x: width / 2 + (Math.random() - 0.5) * 50,
+      y: height / 2 + (Math.random() - 0.5) * 50,
       fx: isSelf ? width / 2 : undefined,
       fy: isSelf ? height / 2 : undefined,
     };
-  });
-
-  // Restore positions for existing nodes
-  newNodes.forEach((node) => {
-    // Don't restore position for self node as it's fixed
-    if (node.type === "self") return;
-
-    const savedPos = nodePositions.get(node.id);
-    if (savedPos) {
-      node.x = savedPos.x;
-      node.y = savedPos.y;
-      node.vx = savedPos.vx;
-      node.vy = savedPos.vy;
-    }
   });
 
   const newLinks: GraphLink[] = [];
@@ -632,7 +640,8 @@ function updateGraph(data: ApiResponse) {
   const nodeEnter = node
     .enter()
     .append("g")
-    .attr("class", "node-group");
+    .attr("class", "node-group")
+    .call(drag(simulation));
 
   nodeEnter.append("circle")
     .attr("stroke", "var(--color-base-100)")
@@ -746,19 +755,22 @@ function updateGraph(data: ApiResponse) {
     ?.links(newLinks);
 
   // Only restart simulation if nodes have changed to avoid jitter
-  // If only data properties changed (bandwidth, latency), we don't need to restart physics
   if (nodesChanged) {
     simulation.alpha(1).restart();
   } else {
-    // Keep it running gently or just tick once
-    // simulation.alpha(0.1).restart(); 
-    // Actually, if we don't restart, the new data properties (like stroke width) will update in the DOM 
-    // because we called .merge() selection logic below, but positions won't change drastically.
-    // However, we need to ensure the tick function runs if we want continuous updates?
-    // D3 force simulation stops when alpha reaches alphaMin.
-    // If we want to keep it "alive" but stable, we can set a low target alpha.
-    // But better: just don't restart aggressively.
-    simulation.alpha(0.1).restart();
+    // If only data updated, just heat up slightly to settle link lengths, but don't full restart
+    // simulation.alpha(0.1).restart();
+    // Actually, if we don't restart, the graph stays stable.
+    // If the user drags nodes, they stay where they are.
+    // If we receive new bandwidth data, we just want to update the DOM (which we did above).
+    // So we don't need to restart simulation at all unless we want to react to forces changes?
+    // But force parameters are constant.
+    // So: do NOTHING if only data changed.
+    simulation.restart(); // Just restart with current alpha (which is likely 0) to apply DOM updates? No, DOM updates are applied by D3 selection.
+    // We only need simulation.tick() to run if positions need to change.
+    // If we want to ensure any drifted nodes come back, we can do alpha(0.01).
+    // But user specifically asked to NOT reset layout.
+    // So let's skip restart.
   }
 
   simulation.on("tick", () => {
