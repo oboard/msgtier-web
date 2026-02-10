@@ -54,22 +54,27 @@ function initializeGraph() {
     .select(container.value)
     .attr(
       "class",
-      "card bg-base-100 shadow-sm border border-base-300 rounded-box h-full",
+      "card shadow-sm rounded-box h-full",
     )
+    .style("background-color", "var(--color-base-100)")
+    .style("border", "1px solid var(--color-base-300)")
     .append("div")
     .attr("class", "card-body p-4");
 
   wrapper
     .append("h3")
-    .attr("class", "card-title text-base-content/80 mb-4 text-sm")
+    .attr("class", "card-title mb-4 text-sm")
+    .style("color", "var(--color-base-content)")
+    .style("opacity", "0.8")
     .text("Network Topology");
 
   const svgContainer = wrapper
     .append("div")
     .attr(
       "class",
-      "w-full h-[600px] flex justify-center items-center bg-base-200/30 rounded-lg overflow-hidden relative",
-    );
+      "w-full h-[600px] flex justify-center items-center rounded-lg overflow-hidden relative",
+    )
+    .style("background-color", "var(--color-base-200)");
 
   // Bind the element for ResizeObserver
   svgContainerElement = svgContainer.node() as HTMLDivElement;
@@ -99,9 +104,9 @@ function initializeGraph() {
     .append("path")
     .attr("d", "M 40 0 L 0 0 0 40")
     .attr("fill", "none")
-    .attr("stroke", "currentColor")
-    .attr("stroke-width", 0.5)
-    .attr("class", "text-base-content/5");
+    .attr("stroke", "var(--color-base-content)")
+    .attr("stroke-opacity", 0.05)
+    .attr("stroke-width", 0.5);
 
   // Glow filter for active nodes/links
   const filter = defs.append("filter").attr("id", "glow");
@@ -123,11 +128,11 @@ function initializeGraph() {
   selfGradient
     .append("stop")
     .attr("offset", "0%")
-    .attr("stop-color", "#60A5FA"); // blue-400
+    .attr("stop-color", "var(--color-primary)"); 
   selfGradient
     .append("stop")
     .attr("offset", "100%")
-    .attr("stop-color", "#2563EB"); // blue-600
+    .attr("stop-color", "var(--color-primary)");
 
   // Gradient for Active Peer
   const activeGradient = defs
@@ -139,11 +144,11 @@ function initializeGraph() {
   activeGradient
     .append("stop")
     .attr("offset", "0%")
-    .attr("stop-color", "#34D399"); // emerald-400
+    .attr("stop-color", "var(--color-success)"); 
   activeGradient
     .append("stop")
     .attr("offset", "100%")
-    .attr("stop-color", "#059669"); // emerald-600
+    .attr("stop-color", "var(--color-success)");
 
   svg
     .append("rect")
@@ -237,14 +242,14 @@ function simplifyProtocol(p: string): string {
 function getProtocolColor(protocol: string): string {
   const p = simplifyProtocol(protocol).toLowerCase();
   switch (p) {
-    case 'tcp': return '#3B82F6'; // blue-500
-    case 'udp': return '#F59E0B'; // amber-500
-    case 'quic': return '#8B5CF6'; // violet-500
-    case 'ws': return '#10B981'; // emerald-500
-    case 'wss': return '#059669'; // emerald-600
-    case 'http': return '#14B8A6'; // teal-500
-    case 'p2p': return '#EC4899'; // pink-500
-    default: return '#9CA3AF';
+    case 'tcp': return 'var(--color-info)'; // blue
+    case 'udp': return 'var(--color-warning)'; // amber/orange
+    case 'quic': return 'var(--color-primary)'; // purple
+    case 'ws': return 'var(--color-success)'; // green
+    case 'wss': return 'var(--color-success)'; // green
+    case 'http': return 'var(--color-accent)'; // teal/cyan
+    case 'p2p': return 'var(--color-secondary)'; // pink
+    default: return 'var(--color-neutral)';
   }
 }
 
@@ -554,7 +559,7 @@ function updateGraph(data: ApiResponse) {
     .attr("class", "proto-bg")
     .attr("rx", 4)
     .attr("ry", 4)
-    .attr("fill", "oklch(var(--b1))")
+    .attr("fill", "var(--color-base-100)")
     .attr("stroke", "currentColor")
     .attr("stroke-width", 1)
     .attr("opacity", 0.9);
@@ -630,11 +635,11 @@ function updateGraph(data: ApiResponse) {
     .attr("class", "node-group");
 
   nodeEnter.append("circle")
-    .attr("stroke", "#ffffff")
+    .attr("stroke", "var(--color-base-100)")
     .attr("stroke-width", 2);
 
   nodeEnter.append("path")
-    .attr("fill", "white")
+    .attr("fill", "var(--color-base-100)")
     .attr("d", d => getIconPath(d.type))
     .attr("transform", "translate(-12, -12) scale(1)"); // Center the 24x24 icon
 
@@ -679,7 +684,7 @@ function updateGraph(data: ApiResponse) {
     .attr("class", "label-bg")
     .attr("rx", 6)
     .attr("ry", 6)
-    .attr("fill", "oklch(var(--b1))")
+    .attr("fill", "var(--color-base-100)")
     .attr("stroke", "currentColor")
     .attr("stroke-width", 1)
     .attr("opacity", 0.9);
@@ -723,8 +728,8 @@ function updateGraph(data: ApiResponse) {
     const textEl = group.select("text").node() as SVGTextElement;
     if (textEl) {
       const bbox = textEl.getBBox();
-      const paddingX = 10;
-      const paddingY = 6;
+      const paddingX = 6;
+      const paddingY = 3;
 
       group.select("rect")
         .attr("x", bbox.x - paddingX)
