@@ -109,7 +109,13 @@ function initializeGraph() {
     .attr("stroke-width", 0.5);
 
   // Glow filter for active nodes/links
-  const filter = defs.append("filter").attr("id", "glow");
+  const filter = defs
+    .append("filter")
+    .attr("id", "glow")
+    .attr("x", "-500%")
+    .attr("y", "-500%")
+    .attr("width", "1000%")
+    .attr("height", "1000%");
   filter
     .append("feGaussianBlur")
     .attr("stdDeviation", "2.5")
@@ -172,6 +178,10 @@ function initializeGraph() {
     .on("zoom", (event) => {
       if (graphGroup) {
         graphGroup.attr("transform", event.transform);
+      }
+      // Update grid pattern transform to create infinite canvas effect
+      if (svg) {
+        svg.select("#grid").attr("patternTransform", event.transform);
       }
     });
 
@@ -774,19 +784,6 @@ function updateGraph(data: ApiResponse) {
   }
 
   simulation.on("tick", () => {
-    // Clamp nodes to canvas bounds with padding
-    newNodes.forEach((d) => {
-      const r = d.type === "self" ? 25 : 18;
-      const padding = 20;
-
-      if (d.x !== undefined) {
-        d.x = Math.max(r + padding, Math.min(width - r - padding, d.x));
-      }
-      if (d.y !== undefined) {
-        d.y = Math.max(r + padding, Math.min(height - r - padding, d.y));
-      }
-    });
-
     // Update curved paths
     linkMerge.attr("d", (d) => {
       const source = d.source as GraphNode;
