@@ -1,13 +1,18 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { apiData } from '../stores/data';
+import { parseAddress, getProtocolColor } from '../utils/address';
 
 const connections = computed(() => {
   const d = apiData.value;
-  return d?.connections ||
-         (d?.peers?.find((p) => p.id === d?.peer_id)?.connections) ||
-         [];
+  // If root connections is missing, use the current peer's connections
+  return d?.peers?.find((p) => p.id === d?.peer_id)?.connections || [];
 });
+
+function getPeerAddresses(peerId: string): string[] {
+  const peer = apiData.value?.peers?.find((p) => p.id === peerId);
+  return peer?.addresses || [];
+}
 
 function getLatency(c: any): number | undefined {
   return c.latency_ms || (c.latency_history?.length ? c.latency_history[c.latency_history.length - 1] : undefined);
@@ -38,20 +43,41 @@ function formatPacketLoss(rate: number | undefined): string {
           <thead class="bg-base-200/50">
             <tr>
               <th>Peer ID</th>
-              <th>Remote Address</th>
+              <th>Protocols / Endpoints</th>
               <th>Latency</th>
               <th>Bandwidth</th>
               <th>Packet Loss</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(connection, i) in connections" :key="`${connection.peer_id}-${connection.remote_addr}-${i}`" class="hover">
-              <td class="font-mono text-sm">{{ connection.peer_id }}</td>
-              <td class="font-mono text-sm">{{ connection.remote_addr }}</td>
+            <tr v-for="(connection, i) in connections" :key="`${connection.peer_id}-${i}`" class="hover">
+              <td class="font-mono text-sm">
+                <div class="font-bold">{{ connection.peer_id }}</div>
+                <div class="text-xs opacity-50">{{ connection.nat_type || 'Unknown NAT' }}</div>
+              </td>
+              <td>
+                <div class="flex flex-col gap-1">
+                  <div v-for="addr in getPeerAddresses(connection.peer_id)" :key="addr" class="flex items-center gap-2 text-xs font-mono">
+                    <span class="badge badge-sm" :class="getProtocolColor(parseAddress(addr).protocol)">
+                      {{ parseAddress(addr).protocol.toUpperCase() }}
+                    </span>
+                    <span :class="{'text-primary': parseAddress(addr).isIPv6}">
+                      {{ parseAddress(addr).ip }}
+                      <span v-if="parseAddress(addr).port">:{{ parseAddress(addr).port }}</span>
+                    </span>
+                  </div>
+                  <div v-if="getPeerAddresses(connection.peer_id).length === 0" class="text-xs opacity-50 italic">
+                    No addresses known
+                  </div>
+                </div>
+              </td>
               <td>
                 <div class="flex items-center space-x-2">
                   <span>{{ connection.latency_display || formatLatency(getLatency(connection)) }}</span>
                   <div v-if="getLatency(connection) && getLatency(connection)! > 100" class="badge badge-warning badge-xs">High</div>
+                </div>
+                <div v-if="connection.latency_history?.length" class="text-[10px] opacity-50 mt-1">
+                  Last {{ connection.latency_history.length }}: {{ connection.latency_history.join(', ') }}
                 </div>
               </td>
               <td>
@@ -62,6 +88,9 @@ function formatPacketLoss(rate: number | undefined): string {
                     :value="connection.bandwidth_mbps"
                     :max="1"
                   ></progress>
+                </div>
+                <div class="text-[10px] opacity-50 mt-1">
+                  Rx: {{ connection.bytes_received || 0 }} / Tx: {{ connection.bytes_sent || 0 }}
                 </div>
               </td>
               <td>{{ connection.packet_loss_display || formatPacketLoss(connection.packet_loss_rate) }}</td>

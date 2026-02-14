@@ -67,10 +67,8 @@ function updateChart() {
   const data = apiData.value;
   if (!data || !svg) return;
   
-  // Get connections from top-level or find them in the peer list for the local node
-  const connections = data.connections || 
-                     (data.peers?.find(p => p.id === data.peer_id)?.connections) || 
-                     [];
+  // Get connections from the peer list for the local node
+  const connections = (data.peers?.find(p => p.id === data.peer_id)?.connections) || [];
   
   const totalBandwidth = connections.reduce((sum, conn) => sum + (conn.bandwidth_mbps || 0), 0);
   

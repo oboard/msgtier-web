@@ -3,6 +3,7 @@ import { onMounted, onUnmounted, ref, watch } from "vue";
 import * as d3 from "d3";
 import { apiData } from "../stores/data";
 import type { ApiResponse } from "../types/api";
+import { parseAddress, simplifyProtocol } from "../utils/address";
 
 interface GraphNode extends d3.SimulationNodeDatum {
   id: string;
@@ -11,19 +12,22 @@ interface GraphNode extends d3.SimulationNodeDatum {
   ips: string[];
 }
 
+interface PortInfo {
+  protocol: string;
+  srcPort: number;
+  dstPort: number;
+}
+
 interface GraphLink extends d3.SimulationLinkDatum<GraphNode> {
   id: string; // Unique ID for D3 key
   source: string | GraphNode;
   target: string | GraphNode;
   bandwidth: number;
   latency: number;
-  remote_addr: string;
-  local_addr?: string;
+  protocols: string[]; // List of protocols supported by the target
+  ports: PortInfo[]; // Detailed port info
   curvatureOffset: number;
   isBidirectional?: boolean;
-  protocol?: string;
-  port?: string;
-  local_port?: string;
 }
 
 const container = ref<HTMLDivElement | null>(null);
@@ -230,97 +234,18 @@ function initializeGraph() {
   }
 }
 
-function simplifyProtocol(p: string): string {
-  if (!p) return "";
-  const upper = p.toUpperCase();
-  if (upper.includes("WSS")) return "WSS";
-  if (upper.includes("WS")) return "WS";
-  if (upper.includes("QUIC")) return "QUIC";
-  if (upper.includes("P2P")) return "P2P";
-  if (upper.includes("TCP")) return "TCP";
-  if (upper.includes("UDP")) return "UDP";
-  return upper.split('/')[0];
-}
-
-function getProtocolColor(protocol: string): string {
+function getGraphColor(protocol: string): string {
   const p = simplifyProtocol(protocol).toLowerCase();
   switch (p) {
     case 'tcp': return 'var(--color-info)'; // blue
     case 'udp': return 'var(--color-warning)'; // amber/orange
-    case 'quic': return 'var(--color-primary)'; // purple
+    case 'quic': return 'var(--color-error)'; // red/pink
     case 'ws': return 'var(--color-success)'; // green
     case 'wss': return 'var(--color-success)'; // green
     case 'http': return 'var(--color-accent)'; // teal/cyan
     case 'p2p': return 'var(--color-secondary)'; // pink
     default: return 'var(--color-neutral)';
   }
-}
-
-function parseAddress(addr: string): { ip: string, port: string, protocol: string } {
-  let ip = "";
-  let port = "";
-  let protocol = "";
-
-  if (!addr) return { ip: "Unknown", port: "", protocol: "" };
-
-  // Try to parse multiaddr
-  if (addr.startsWith("/")) {
-    const parts = addr.split("/").filter((p) => p);
-    // Common parts: ['ip4', '1.2.3.4', 'tcp', '8080']
-
-    for (let i = 0; i < parts.length; i++) {
-      if (parts[i] === "ip4" || parts[i] === "ip6") {
-        ip = parts[i + 1];
-        i++;
-      } else if (["tcp", "udp", "quic", "ws", "wss", "p2p-circuit"].includes(parts[i])) {
-        protocol = protocol ? `${protocol}/${parts[i]}` : parts[i];
-        if (parts[i + 1] && /^\d+$/.test(parts[i + 1])) {
-          port = parts[i + 1];
-          i++;
-        }
-      }
-    }
-
-    // Fallback if IP not found but other parts exist (e.g. dns)
-    if (!ip && parts.length > 0) {
-      // Just take the value after the first key if it looks like an address/domain
-      if (!['tcp', 'udp', 'quic', 'ws', 'wss', 'p2p-circuit'].includes(parts[0])) {
-        ip = parts[1] || parts[0];
-      }
-    }
-  } else if (addr.includes("://")) {
-    const parts = addr.split("://");
-    protocol = parts[0];
-    const remainder = parts[1];
-
-    // Handle IPv6 brackets if present
-    const lastColonIndex = remainder.lastIndexOf(":");
-    // Simple check: if last colon is after the last bracket (if any)
-    const lastBracketIndex = remainder.lastIndexOf("]");
-
-    if (lastColonIndex !== -1 && lastColonIndex > lastBracketIndex) {
-      port = remainder.substring(lastColonIndex + 1);
-      ip = remainder.substring(0, lastColonIndex);
-      // remove brackets if ipv6
-      if (ip.startsWith("[") && ip.endsWith("]")) {
-        ip = ip.slice(1, -1);
-      }
-    } else {
-      ip = remainder;
-    }
-  } else {
-    ip = addr;
-  }
-
-  return { ip, port, protocol: protocol.toUpperCase() };
-}
-
-function formatAddress(addr: string): string {
-  const { ip, port, protocol } = parseAddress(addr);
-  if (ip) {
-    return `${ip}${port ? `:${port}` : ""} ${protocol ? `(${protocol})` : ""}`;
-  }
-  return addr;
 }
 
 function truncateId(id: string): string {
@@ -421,18 +346,53 @@ function updateGraph(data: ApiResponse) {
       // Skip self-loops
       if (sourceId === targetId) return;
 
-      const parsed = parseAddress(conn.remote_addr);
-      const parsedLocal = parseAddress(conn.local_addr || "");
+      const bandwidth = conn.bandwidth_mbps || 0;
+      const latency = conn.latency_ms || (conn.latency_history?.length ? conn.latency_history[conn.latency_history.length - 1] : 0);
+
+      // Handle multiple ports if present
+      if (conn.ports && conn.ports.length > 0) {
+        const ports: PortInfo[] = conn.ports.map(p => ({
+          protocol: p.protocol,
+          srcPort: p.src,
+          dstPort: p.dst
+        }));
+
+        const protocols = ports.map(p => p.protocol).filter((p, i, arr) => arr.indexOf(p) === i);
+
+        const linkData = {
+          source: sourceId,
+          target: targetId,
+          bandwidth: bandwidth,
+          latency: latency,
+          protocols: protocols,
+          ports: ports,
+          id: conn.id,
+          originalIndex: index
+        };
+
+        if (conn.id) {
+          if (!connectionMap.has(conn.id)) {
+            connectionMap.set(conn.id, []);
+          }
+          connectionMap.get(conn.id)!.push(linkData);
+        } else {
+          standaloneLinks.push(linkData);
+        }
+        return;
+      }
+
+      // Find target peer to get supported protocols
+      const targetPeer = data.peers.find(p => p.id === targetId);
+      const targetAddrs = targetPeer ? targetPeer.addresses : [];
+      const protocols = targetAddrs.map(a => parseAddress(a).protocol).filter((p, i, arr) => arr.indexOf(p) === i);
+
       const linkData = {
         source: sourceId,
         target: targetId,
-        bandwidth: conn.bandwidth_mbps || 0,
-        latency: conn.latency_ms || (conn.latency_history?.length ? conn.latency_history[conn.latency_history.length - 1] : 0),
-        remote_addr: conn.remote_addr,
-        local_addr: conn.local_addr,
-        protocol: parsed.protocol,
-        port: parsed.port,
-        local_port: parsedLocal.port,
+        bandwidth: bandwidth,
+        latency: latency,
+        protocols: protocols,
+        ports: [],
         id: conn.id,
         originalIndex: index
       };
@@ -455,8 +415,6 @@ function updateGraph(data: ApiResponse) {
     // If multiple links share the same ID, they are part of the same bidirectional connection
     if (links.length > 1) {
       // Merge them into a single logical link
-      // We use the first link as the base for source/target direction (it doesn't strictly matter for undirected graph visual, 
-      // but we need consistent direction for curvature calculation later)
       const baseLink = links[0];
 
       // Calculate aggregate stats
@@ -469,12 +427,8 @@ function updateGraph(data: ApiResponse) {
         isBidirectional: true,
         bandwidth: totalBandwidth,
         latency: avgLatency,
-        remote_addr: links.map(l => l.remote_addr).join(" ↔ "),
-        // Keep protocol/port from base link or maybe show mixed?
-        // Let's keep it simple for now
-        protocol: baseLink.protocol,
-        port: baseLink.port,
-        local_port: baseLink.local_port,
+        protocols: baseLink.protocols, // Use protocols from one side (should be same/similar set of capabilities)
+        ports: baseLink.ports || [],
         curvatureOffset: 0
       });
     } else {
@@ -520,7 +474,6 @@ function updateGraph(data: ApiResponse) {
       const offset = (i - (n - 1) / 2) * spacing;
 
       // Check direction relative to canonical key
-      // link.source might be string ID or Node object depending on D3 state, but here we construct newLinks so it's string ID from logicalLinks
       const sId = typeof link.source === 'object' ? (link.source as GraphNode).id : link.source as string;
 
       if (sId === id1) {
@@ -539,105 +492,173 @@ function updateGraph(data: ApiResponse) {
   let nodeGroup = graphGroup.select<SVGGElement>(".nodes");
   let labelGroup = graphGroup.select<SVGGElement>(".labels");
 
-  // Update links (PATHS instead of LINES)
+  // Update links (GROUPS instead of PATHS)
   const link = linkGroup
-    .selectAll<SVGPathElement, GraphLink>("path")
+    .selectAll<SVGGElement, GraphLink>("g")
     .data(newLinks, (d) => d.id);
 
   link.exit().remove();
 
-  const linkEnter = link.enter().append("path").attr("fill", "none").attr("stroke-opacity", 0.6);
+  const linkEnter = link.enter().append("g").attr("class", "link-group");
 
-  const linkMerge = linkEnter
-    .merge(link)
-    .attr("stroke", (d) => getProtocolColor(d.protocol || 'TCP')) // Color by protocol
-    .attr("stroke-width", (d) => Math.max(1.5, d.bandwidth * 2))
-    .attr("filter", "url(#glow)"); // Always glow
+  // Append background connection line
+  linkEnter.append("path")
+    .attr("class", "connection-bg")
+    .attr("fill", "none")
+    .attr("stroke-opacity", 0.1)
+    .attr("stroke", "var(--color-base-content)");
+
+  const linkMerge = linkEnter.merge(link);
+
+  // Update background line
+  linkMerge.select(".connection-bg")
+    .attr("stroke-width", (d) => {
+      const ports = d.ports.length > 0 ? d.ports : d.protocols.map(p => ({ protocol: p, srcPort: 0, dstPort: 0 }));
+      return Math.max(16, ports.length * 12 + 8);
+    });
+
+  // Manage internal port lines and labels
+  linkMerge.each(function (d) {
+    const group = d3.select(this);
+
+    // Bind port data to internal paths
+    const ports = d.ports.length > 0 ? d.ports : d.protocols.map(p => ({ protocol: p, srcPort: 0, dstPort: 0 }));
+
+    // 1. Port Lines
+    const portLines = group.selectAll<SVGPathElement, PortInfo>(".port-line")
+      .data(ports);
+
+    portLines.exit().remove();
+
+    portLines.enter()
+      .append("path")
+      .attr("class", "port-line")
+      .attr("fill", "none")
+      .attr("stroke-opacity", 0.8)
+      .merge(portLines)
+      .attr("stroke", (p) => getGraphColor(p.protocol))
+      .attr("stroke-width", 2)
+      .attr("filter", "url(#glow)");
+
+    // 2. Port Labels
+    const portLabels = group.selectAll<SVGGElement, PortInfo>(".port-label")
+      .data(ports);
+
+    portLabels.exit().remove();
+
+    const labelEnter = portLabels.enter()
+      .append("g")
+      .attr("class", "port-label")
+      .attr("opacity", 0.9);
+
+    // Background Rect
+    labelEnter.append("rect")
+      .attr("class", "port-label-bg")
+      .attr("rx", 4)
+      .attr("ry", 4)
+      .attr("fill", "var(--color-base-100)")
+      .attr("stroke-width", 1)
+      .attr("opacity", 0.9);
+
+    // Protocol Text
+    labelEnter.append("text")
+      .attr("class", "port-proto")
+      .attr("font-family", "monospace")
+      .attr("font-size", "8px")
+      .attr("text-anchor", "middle")
+      .attr("dy", "0.3em")
+      .attr("font-weight", "bold");
+
+    // Src Port
+    labelEnter.append("text")
+      .attr("class", "port-src")
+      .attr("font-family", "monospace")
+      .attr("font-size", "7px")
+      .attr("text-anchor", "end")
+      .attr("dx", "-16")
+      .attr("dy", "0.3em");
+
+    // Dst Port
+    labelEnter.append("text")
+      .attr("class", "port-dst")
+      .attr("font-family", "monospace")
+      .attr("font-size", "7px")
+      .attr("text-anchor", "start")
+      .attr("dx", "16")
+      .attr("dy", "0.3em");
+
+    const labelMerge = labelEnter.merge(portLabels);
+
+    labelMerge.select(".port-proto")
+      .text(p => simplifyProtocol(p.protocol))
+      .attr("fill", p => getGraphColor(p.protocol));
+
+    labelMerge.select(".port-src")
+      .text(p => p.srcPort > 0 ? p.srcPort.toString() : '')
+      .attr("fill", "currentColor")
+      .attr("opacity", 0.7);
+
+    labelMerge.select(".port-dst")
+      .text(p => p.dstPort > 0 ? p.dstPort.toString() : '')
+      .attr("fill", "currentColor")
+      .attr("opacity", 0.7);
+
+    labelMerge.each(function (p) {
+      const group = d3.select(this);
+      
+      const protoEl = group.select<SVGTextElement>(".port-proto").node();
+      const srcEl = group.select<SVGTextElement>(".port-src").node();
+      const dstEl = group.select<SVGTextElement>(".port-dst").node();
+      
+      if (!protoEl || !srcEl || !dstEl) return;
+      
+      const b1 = protoEl.getBBox();
+      const b2 = srcEl.getBBox();
+      const b3 = dstEl.getBBox();
+      
+      let minX = b1.x;
+      let minY = b1.y;
+      let maxX = b1.x + b1.width;
+      let maxY = b1.y + b1.height;
+      
+      if (p.srcPort > 0 && b2.width > 0) {
+        minX = Math.min(minX, b2.x);
+        minY = Math.min(minY, b2.y);
+        maxX = Math.max(maxX, b2.x + b2.width);
+        maxY = Math.max(maxY, b2.y + b2.height);
+      }
+      
+      if (p.dstPort > 0 && b3.width > 0) {
+        minX = Math.min(minX, b3.x);
+        minY = Math.min(minY, b3.y);
+        maxX = Math.max(maxX, b3.x + b3.width);
+        maxY = Math.max(maxY, b3.y + b3.height);
+      }
+      
+      const paddingX = 6;
+      const paddingY = 4;
+      
+      group.select(".port-label-bg")
+        .attr("x", minX - paddingX)
+        .attr("y", minY - paddingY/2)
+        .attr("width", maxX - minX + paddingX * 2)
+        .attr("height", maxY - minY + paddingY)
+        .attr("stroke", getGraphColor(p.protocol))
+        .attr("filter", "url(#glow)");
+    });
+  });
 
   linkMerge.select("title").remove();
   linkMerge
     .append("title")
     .text(
       (d) =>
-        `Remote: ${d.remote_addr}\nBandwidth: ${d.bandwidth.toFixed(3)} Mbps\nLatency: ${d.latency}ms`,
+        `Protocols: ${d.protocols.join(', ')}\nPorts: ${d.ports.map(p => `${p.srcPort}->${p.dstPort}`).join(', ')}\nBandwidth: ${d.bandwidth.toFixed(3)} Mbps\nLatency: ${d.latency}ms`,
     );
 
   // Update link labels
-  const linkLabel = linkLabelGroup
-    .selectAll<SVGGElement, GraphLink>("g")
-    .data(newLinks, (d) => d.id);
-
-  linkLabel.exit().remove();
-
-  const linkLabelEnter = linkLabel.enter().append("g")
-    .attr("class", "link-label-group");
-
-  // Protocol Label Background (Rect)
-  linkLabelEnter.append("rect")
-    .attr("class", "proto-bg")
-    .attr("rx", 4)
-    .attr("ry", 4)
-    .attr("fill", "var(--color-base-100)")
-    .attr("stroke", "currentColor")
-    .attr("stroke-width", 1)
-    .attr("opacity", 0.9);
-
-  // Protocol Text
-  linkLabelEnter.append("text")
-    .attr("class", "proto-text")
-    .attr("font-family", "monospace")
-    .attr("font-size", "10px")
-    .attr("fill", "currentColor")
-    .attr("text-anchor", "middle")
-    .attr("dy", "0.3em")
-    .attr("font-weight", "bold");
-
-  // Source Port Text
-  linkLabelEnter.append("text")
-    .attr("class", "port-src")
-    .attr("font-family", "monospace")
-    .attr("font-size", "9px")
-    .attr("fill", "currentColor")
-    .attr("opacity", 0.8)
-    .attr("text-anchor", "middle")
-    .attr("dy", "0.3em");
-
-  // Target Port Text
-  linkLabelEnter.append("text")
-    .attr("class", "port-dst")
-    .attr("font-family", "monospace")
-    .attr("font-size", "9px")
-    .attr("fill", "currentColor")
-    .attr("opacity", 0.8)
-    .attr("text-anchor", "middle")
-    .attr("dy", "0.3em");
-
-  const linkLabelMerge = linkLabelEnter.merge(linkLabel);
-
-  linkLabelMerge.select(".proto-text")
-    .text(d => simplifyProtocol(d.protocol || ''))
-    .style("fill", d => getProtocolColor(d.protocol || ''));
-
-  linkLabelMerge.select(".proto-bg")
-    .style("stroke", d => getProtocolColor(d.protocol || ''));
-
-  linkLabelMerge.select(".port-src")
-    .text(d => d.local_port || '');
-
-  linkLabelMerge.select(".port-dst")
-    .text(d => d.port || '');
-
-  // Calculate rect size based on text length (approximate)
-  linkLabelMerge.each(function (d) {
-    const group = d3.select(this);
-    const text = simplifyProtocol(d.protocol || '');
-    const width = text.length * 7 + 10; // Approx width
-    group.select(".proto-bg")
-      .attr("width", width)
-      .attr("height", 16)
-      .attr("x", -width / 2)
-      .attr("y", -8);
-  });
+  // Removed old label logic as we now have port labels inside the link group
+  linkLabelGroup.selectAll("*").remove();
 
 
   // Update nodes
@@ -785,69 +806,11 @@ function updateGraph(data: ApiResponse) {
 
   simulation.on("tick", () => {
     // Update curved paths
-    linkMerge.attr("d", (d) => {
-      const source = d.source as GraphNode;
-      const target = d.target as GraphNode;
-
-      if (!source.x || !source.y || !target.x || !target.y) return "";
-
-      const dx = target.x - source.x;
-      const dy = target.y - source.y;
-
-      const mx = (source.x + target.x) / 2;
-      const my = (source.y + target.y) / 2;
-
-      const len = Math.sqrt(dx * dx + dy * dy);
-      if (len === 0) return "";
-
-      // Normal vector
-      const nx = -dy / len;
-      const ny = dx / len;
-
-      // Use pre-calculated offset
-      const offset = d.curvatureOffset;
-
-      const cx = mx + nx * offset;
-      const cy = my + ny * offset;
-
-      // Calculate intersection points with node boundaries
-      const sourceR = (source.type === "self" ? 25 : 18) + 8; // Radius + padding
-      const targetR = (target.type === "self" ? 25 : 18) + 8;
-
-      // Vector from Source to Control Point (tangent approximation)
-      const dxSC = cx - source.x;
-      const dySC = cy - source.y;
-      const lenSC = Math.sqrt(dxSC * dxSC + dySC * dySC);
-
-      let sx = source.x;
-      let sy = source.y;
-
-      if (lenSC > 0) {
-        sx += (dxSC / lenSC) * sourceR;
-        sy += (dySC / lenSC) * sourceR;
-      }
-
-      // Vector from Target to Control Point
-      const dxTC = cx - target.x;
-      const dyTC = cy - target.y;
-      const lenTC = Math.sqrt(dxTC * dxTC + dyTC * dyTC);
-
-      let tx = target.x;
-      let ty = target.y;
-
-      if (lenTC > 0) {
-        tx += (dxTC / lenTC) * targetR;
-        ty += (dyTC / lenTC) * targetR;
-      }
-
-      return `M${sx},${sy} Q${cx},${cy} ${tx},${ty}`;
-    });
-
-    // Update link labels position and rotation
-    linkLabelMerge.each(function (d) {
+    linkMerge.each(function (d) {
       const group = d3.select(this);
       const source = d.source as GraphNode;
       const target = d.target as GraphNode;
+
       if (!source.x || !source.y || !target.x || !target.y) return;
 
       const dx = target.x - source.x;
@@ -857,21 +820,18 @@ function updateGraph(data: ApiResponse) {
 
       const mx = (source.x + target.x) / 2;
       const my = (source.y + target.y) / 2;
-
       const nx = -dy / len;
       const ny = dx / len;
 
-      // Use pre-calculated offset
       const offset = d.curvatureOffset;
-
       const cx = mx + nx * offset;
       const cy = my + ny * offset;
 
       // Calculate intersection points with node boundaries
-      const sourceR = (source.type === "self" ? 25 : 18) + 8; // Radius + padding
+      const sourceR = (source.type === "self" ? 25 : 18) + 8;
       const targetR = (target.type === "self" ? 25 : 18) + 8;
 
-      // Vector from Source to Control Point (tangent approximation)
+      // Vector from Source to Control Point
       const dxSC = cx - source.x;
       const dySC = cy - source.y;
       const lenSC = Math.sqrt(dxSC * dxSC + dySC * dySC);
@@ -897,72 +857,103 @@ function updateGraph(data: ApiResponse) {
         ty += (dyTC / lenTC) * targetR;
       }
 
-      // Curve midpoint at t=0.5 (Quadratic Bezier)
-      // B(t) = (1-t)^2 P0 + 2(1-t)t P1 + t^2 P2
-      // t = 0.5
-      // B(0.5) = 0.25 P0 + 0.5 P1 + 0.25 P2
-      const curveX = 0.25 * sx + 0.5 * cx + 0.25 * tx;
-      const curveY = 0.25 * sy + 0.5 * cy + 0.25 * ty;
+      const mainPath = `M${sx},${sy} Q${cx},${cy} ${tx},${ty}`;
 
-      // Calculate angle
-      let angle = Math.atan2(dy, dx) * 180 / Math.PI;
-      // Flip if reading backwards
-      if (angle > 90 || angle < -90) {
-        angle += 180;
+      // Update background path
+      group.select(".connection-bg").attr("d", mainPath);
+
+      // Update internal port lines
+      const portLines = group.selectAll(".port-line");
+      const numPorts = portLines.size();
+
+      if (numPorts > 0) {
+        portLines.attr("d", (p, i) => {
+          // Calculate offset for this specific port line
+          // Spacing: 24px
+          const spacing = 24;
+          // Center the group of lines
+          const totalWidth = (numPorts - 1) * spacing;
+          const localOffset = (i * spacing) - (totalWidth / 2);
+
+          // Apply local offset to curvatureOffset
+          const totalOffset = d.curvatureOffset + localOffset;
+
+          const pcx = mx + nx * totalOffset;
+          const pcy = my + ny * totalOffset;
+
+          // Calculate intersection points with node boundaries for this specific curve
+          // Vector from Source to Control Point
+          const dxSC = pcx - source.x!;
+          const dySC = pcy - source.y!;
+          const lenSC = Math.sqrt(dxSC * dxSC + dySC * dySC);
+
+          let psx = source.x!;
+          let psy = source.y!;
+
+          if (lenSC > 0) {
+            psx += (dxSC / lenSC) * sourceR;
+            psy += (dySC / lenSC) * sourceR;
+          }
+
+          // Vector from Target to Control Point
+          const dxTC = pcx - target.x!;
+          const dyTC = pcy - target.y!;
+          const lenTC = Math.sqrt(dxTC * dxTC + dyTC * dyTC);
+
+          let ptx = target.x!;
+          let pty = target.y!;
+
+          if (lenTC > 0) {
+            ptx += (dxTC / lenTC) * targetR;
+            pty += (dyTC / lenTC) * targetR;
+          }
+
+          return `M${psx},${psy} Q${pcx},${pcy} ${ptx},${pty}`;
+        });
       }
 
-      // Update group transform for the central part
-      // We'll apply the rotation to the whole group, but we need to position the ports relative to this rotated frame
-      // Actually, it's easier to position everything absolutely if we don't rotate the whole group?
-      // But rotation matches the line direction.
-      // Let's rotate the whole group around the midpoint.
+      // Update internal port labels
+      const portLabels = group.selectAll(".port-label");
+      if (portLabels.size() > 0) {
+        portLabels.attr("transform", (p: any, i) => {
+          // Same spacing logic
+          const spacing = 24;
+          const totalWidth = (numPorts - 1) * spacing;
+          const localOffset = (i * spacing) - (totalWidth / 2);
+          const totalOffset = d.curvatureOffset + localOffset;
 
-      group.attr("transform", `translate(${curveX}, ${curveY}) rotate(${angle})`);
+          const pcx = mx + nx * totalOffset;
+          const pcy = my + ny * totalOffset;
 
-      // Now calculate positions for ports relative to the midpoint (0,0) in the rotated frame.
-      // The distance from midpoint to start/end is roughly half the path length.
-      // But since it's a curve, it's not exactly linear distance.
-      // However, for visualization, placing them at fixed offsets from center might be enough?
-      // No, connection lengths vary wildy.
+          // Re-calculate endpoints
+          const dxSC = pcx - source.x!;
+          const dySC = pcy - source.y!;
+          const lenSC = Math.sqrt(dxSC * dxSC + dySC * dySC);
+          let psx = source.x! + (lenSC > 0 ? (dxSC / lenSC) * sourceR : 0);
+          let psy = source.y! + (lenSC > 0 ? (dySC / lenSC) * sourceR : 0);
 
-      // Calculate distance from curve midpoint to start/end in the unrotated frame
-      const distStart = Math.sqrt(Math.pow(sx - curveX, 2) + Math.pow(sy - curveY, 2));
-      const distEnd = Math.sqrt(Math.pow(tx - curveX, 2) + Math.pow(ty - curveY, 2));
+          const dxTC = pcx - target.x!;
+          const dyTC = pcy - target.y!;
+          const lenTC = Math.sqrt(dxTC * dxTC + dyTC * dyTC);
+          let ptx = target.x! + (lenTC > 0 ? (dxTC / lenTC) * targetR : 0);
+          let pty = target.y! + (lenTC > 0 ? (dyTC / lenTC) * targetR : 0);
 
-      // We want ports to be slightly inwards from the ends.
-      // In the rotated frame, the line is roughly horizontal along X axis.
-      // Source is at negative X, Target is at positive X (or vice versa depending on rotation).
-      // Angle logic: atan2(dy, dx) means 0 deg is +X.
-      // If we didn't flip angle: Source is left (-X), Target is right (+X).
-      // If we flipped angle (added 180): Source is right (+X), Target is left (-X).
+          // Midpoint
+          const midX = 0.25 * psx + 0.5 * pcx + 0.25 * ptx;
+          const midY = 0.25 * psy + 0.5 * pcy + 0.25 * pty;
 
-      const flipped = (Math.atan2(dy, dx) * 180 / Math.PI) > 90 || (Math.atan2(dy, dx) * 180 / Math.PI) < -90;
+          // Angle
+          const dxT = ptx - psx;
+          const dyT = pty - psy;
+          let angle = Math.atan2(dyT, dxT) * (180 / Math.PI);
 
-      // Adjust offsets
-      // We want to place text immediately next to the protocol label (center)
-      const text = simplifyProtocol(d.protocol || '');
-      const protoWidth = text.length * 7 + 10;
-      const halfWidth = protoWidth / 2;
-      const gap = 4;
+          // Adjust angle to keep text upright
+          if (angle > 90 || angle < -90) {
+            angle += 180;
+          }
 
-      if (flipped) {
-        // Flipped: +X is Source side, -X is Target side
-        group.select(".port-src")
-          .attr("x", halfWidth + gap)
-          .attr("text-anchor", "start");
-
-        group.select(".port-dst")
-          .attr("x", -(halfWidth + gap))
-          .attr("text-anchor", "end");
-      } else {
-        // Normal: -X is Source side, +X is Target side
-        group.select(".port-src")
-          .attr("x", -(halfWidth + gap))
-          .attr("text-anchor", "end");
-
-        group.select(".port-dst")
-          .attr("x", halfWidth + gap)
-          .attr("text-anchor", "start");
+          return `translate(${midX}, ${midY}) rotate(${angle})`;
+        });
       }
     });
 
