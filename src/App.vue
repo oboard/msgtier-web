@@ -2,6 +2,7 @@
 import { onMounted } from "vue";
 import Header from "./components/Header.vue";
 import StatsCards from "./components/StatsCards.vue";
+import Chat from "./components/Chat.vue";
 import NetworkGraph from "./components/NetworkGraph.vue";
 import ConnectionsTable from "./components/ConnectionsTable.vue";
 import RoutesTable from "./components/RoutesTable.vue";
@@ -21,6 +22,8 @@ onMounted(() => {
 
       <template v-if="apiData">
         <StatsCards />
+        
+        <Chat />
 
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div class="lg:col-span-2">
