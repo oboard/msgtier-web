@@ -22,14 +22,8 @@ jobs:
     - name: Build
       run: bun run build
 
-    - name: Zip dist folder
-      run: |
-        cd dist
-        zip -r ../dist.zip .
-        cd ..
-
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
         name: dist
-        path: dist.zip
+        path: dist/
