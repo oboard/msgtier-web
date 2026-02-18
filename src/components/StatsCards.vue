@@ -28,7 +28,7 @@ const avgLatency = computed(() => {
 
 <template>
   <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-    <div class="stat bg-base-100 shadow-sm border border-base-300 rounded-box">
+    <div class="stat bg-base-100">
       <div class="stat-figure text-primary">
         <div class="p-2 bg-primary/10 rounded-lg">
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="w-6 h-6 stroke-current">
@@ -42,7 +42,7 @@ const avgLatency = computed(() => {
       <div class="stat-desc">Connected nodes</div>
     </div>
 
-    <div class="stat bg-base-100 shadow-sm border border-base-300 rounded-box">
+    <div class="stat bg-base-100">
       <div class="stat-figure text-info">
         <div class="p-2 bg-info/10 rounded-lg">
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="w-6 h-6 stroke-current">
@@ -56,7 +56,7 @@ const avgLatency = computed(() => {
       <div class="stat-desc">Mbps</div>
     </div>
 
-    <div class="stat bg-base-100 shadow-sm border border-base-300 rounded-box">
+    <div class="stat bg-base-100">
       <div class="stat-figure text-warning">
         <div class="p-2 bg-warning/10 rounded-lg">
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="w-6 h-6 stroke-current">

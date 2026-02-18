@@ -25,7 +25,7 @@ function truncateId(id: string): string {
 </script>
 
 <template>
-  <div class="card bg-base-100 shadow-lg border border-base-200 rounded-xl mt-6 overflow-hidden">
+  <div class="card bg-base-100 border border-base-200 rounded-xl mt-6 overflow-hidden">
     <div class="card-body p-0">
       <div class="p-4 border-b border-base-200 flex justify-between items-center bg-base-200/30">
         <div class="flex items-center gap-2">

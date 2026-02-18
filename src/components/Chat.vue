@@ -214,7 +214,7 @@ const getDownloadUrl = (msg: ChatMessage) => {
 </script>
 
 <template>
-  <div class="card bg-base-100 shadow-xl h-[calc(100vh-12rem)] md:h-[600px] flex flex-row overflow-hidden relative">
+  <div class="card bg-base-100 h-[calc(100vh-12rem)] md:h-[600px] flex flex-row overflow-hidden relative">
     <!-- Sidebar: Peer List -->
     <div 
       class="w-full md:w-80 border-r border-base-300 flex flex-col bg-base-200 transition-all duration-300 absolute md:relative z-10 h-full"
@@ -234,7 +234,7 @@ const getDownloadUrl = (msg: ChatMessage) => {
               :class="{ 'active': selectedPeerId === peer.id }"
               class="flex items-center gap-3 py-3 px-4 rounded-btn transition-all duration-200"
             >
-              <div class="w-10 h-10 rounded-full bg-base-300 flex items-center justify-center shadow-sm" :class="{ 'ring-2 ring-primary ring-offset-2': selectedPeerId === peer.id }">
+              <div class="w-10 h-10 rounded-full bg-base-300 flex items-center justify-center" :class="{ 'ring-2 ring-primary ring-offset-2': selectedPeerId === peer.id }">
                 <svg v-if="peer.id === 'broadcast'" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M10.34 15.84c-.688-.06-1.386-.09-2.09-.09H7.5a4.5 4.5 0 110-9h.75c.704 0 1.402-.03 2.09-.09m0 9.18c.253.962.584 1.892.985 2.783.247.55.06 1.21-.463 1.511l-.657.38c-.551.318-1.26.117-1.527-.461a20.845 20.845 0 01-1.44-4.282m3.102.069a18.03 18.03 0 01-.59-4.59c0-1.586.205-3.124.59-4.59m0 9.18a23.848 23.848 0 018.835 2.535M10.34 6.66a23.847 23.847 0 018.835-2.535m0 0A23.74 23.74 0 0018.795 3m.38 1.125a23.91 23.91 0 011.014 5.395m-1.014 8.855c-.118.38-.245.754-.38 1.125m.38-1.125a23.91 23.91 0 001.014-5.395m0-3.46c.495.43.816 1.035.816 1.73 0 .695-.321 1.3-.816 1.73m0-3.46a24.347 24.347 0 010 3.46" />
                 </svg>
@@ -277,14 +277,14 @@ const getDownloadUrl = (msg: ChatMessage) => {
       <template v-else>
         <!-- Header -->
         <div
-          class="p-3 border-b border-base-300 bg-base-100/95 backdrop-blur flex justify-between items-center shadow-sm z-10 sticky top-0">
+          class="p-3 border-b border-base-300 bg-base-100/95 backdrop-blur flex justify-between items-center z-10 sticky top-0">
           <div class="font-bold flex items-center gap-3">
             <!-- Mobile Sidebar Toggle -->
             <button class="btn btn-circle btn-ghost btn-sm md:hidden -ml-2 mr-1" @click="selectedPeerId = null">
               <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" /></svg>
             </button>
 
-            <div class="w-10 h-10 rounded-full bg-base-300 flex items-center justify-center shadow-md">
+            <div class="w-10 h-10 rounded-full bg-base-300 flex items-center justify-center">
               <svg v-if="selectedPeerId === 'broadcast'" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M10.34 15.84c-.688-.06-1.386-.09-2.09-.09H7.5a4.5 4.5 0 110-9h.75c.704 0 1.402-.03 2.09-.09m0 9.18c.253.962.584 1.892.985 2.783.247.55.06 1.21-.463 1.511l-.657.38c-.551.318-1.26.117-1.527-.461a20.845 20.845 0 01-1.44-4.282m3.102.069a18.03 18.03 0 01-.59-4.59c0-1.586.205-3.124.59-4.59m0 9.18a23.848 23.848 0 018.835 2.535M10.34 6.66a23.847 23.847 0 018.835-2.535m0 0A23.74 23.74 0 0018.795 3m.38 1.125a23.91 23.91 0 011.014 5.395m-1.014 8.855c-.118.38-.245.754-.38 1.125m.38-1.125a23.91 23.91 0 001.014-5.395m0-3.46c.495.43.816 1.035.816 1.73 0 .695-.321 1.3-.816 1.73m0-3.46a24.347 24.347 0 010 3.46" />
               </svg>
@@ -306,7 +306,7 @@ const getDownloadUrl = (msg: ChatMessage) => {
             :class="msg.isSelf ? 'chat-end' : 'chat-start'">
 
             <div class="chat-image avatar">
-              <div class="w-8 h-8 rounded-full bg-base-300 flex items-center justify-center shadow-sm opacity-70">
+              <div class="w-8 h-8 rounded-full bg-base-300 flex items-center justify-center opacity-70">
                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
                 </svg>
@@ -318,7 +318,7 @@ const getDownloadUrl = (msg: ChatMessage) => {
               <time class="text-[10px]">{{ formatTime(msg.timestamp) }}</time>
             </div>
 
-            <div class="chat-bubble shadow-md" :class="msg.isSelf ? 'chat-bubble-primary' : 'chat-bubble-secondary'">
+            <div class="chat-bubble" :class="msg.isSelf ? 'chat-bubble-primary' : 'chat-bubble-secondary'">
               <!-- Text Message -->
               <span v-if="msg.kind === 'text'" class="whitespace-pre-wrap">{{ msg.content }}</span>
 
@@ -369,7 +369,7 @@ const getDownloadUrl = (msg: ChatMessage) => {
           <input v-model="messageText" @keyup.enter="sendMessage" type="text" placeholder="Type a message..."
             class="input input-bordered flex-1 rounded-full focus:outline-none focus:ring-2 focus:ring-primary/50 bg-base-200/50" />
 
-          <button class="btn btn-circle btn-primary shadow-md transition-transform active:scale-95" @click="sendMessage"
+          <button class="btn btn-circle btn-primary transition-transform active:scale-95" @click="sendMessage"
             :disabled="!messageText.trim()">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
               stroke="currentColor" class="w-5 h-5 translate-x-0.5">

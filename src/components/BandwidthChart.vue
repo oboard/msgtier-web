@@ -21,7 +21,7 @@ function initializeChart() {
   
   // Wrap in a card structure
   const wrapper = d3.select(container.value)
-    .attr('class', 'card bg-base-100 shadow-sm border border-base-300 rounded-box h-full')
+    .attr('class', 'card bg-base-100 border border-base-300 rounded-box h-full')
     .append('div')
     .attr('class', 'card-body p-4');
     
@@ -144,7 +144,7 @@ watch(apiData, (newData) => {
 </script>
 
 <template>
-<div class="card bg-base-100 shadow-xl rounded-2xl">
+<div class="card bg-base-100">
   <div class="card-body">
     <h2 class="card-title">Bandwidth Over Time</h2>
     <div ref="container" class="flex justify-center"></div>

@@ -19,7 +19,7 @@ onMounted(() => {
         <RouterView />
       </template>
       <template v-else>
-        <div class="hero min-h-96 bg-base-100 rounded-2xl shadow-xl">
+        <div class="hero min-h-96 bg-base-100 rounded-2x">
           <div class="hero-content text-center">
             <div class="max-w-md">
               <span class="loading loading-spinner loading-lg text-primary"></span>

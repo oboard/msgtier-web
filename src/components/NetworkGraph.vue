@@ -58,7 +58,7 @@ function initializeGraph() {
     .select(container.value)
     .attr(
       "class",
-      "card shadow-sm rounded-box h-full",
+      "card rounded-box h-full",
     )
     .style("background-color", "var(--color-base-100)")
     .style("border", "1px solid var(--color-base-300)")

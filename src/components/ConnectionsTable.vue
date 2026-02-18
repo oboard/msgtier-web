@@ -55,7 +55,7 @@ function truncateId(id: string): string {
 </script>
 
 <template>
-  <div class="card bg-base-100 shadow-lg border border-base-200 rounded-xl overflow-hidden">
+  <div class="card bg-base-100 border border-base-200 rounded-xl overflow-hidden">
     <div class="card-body p-0">
       <div class="p-4 border-b border-base-200 flex justify-between items-center bg-base-200/30">
         <div class="flex items-center gap-2">
@@ -126,7 +126,7 @@ function truncateId(id: string): string {
               </td>
               <td>
                 <div class="flex items-center gap-2">
-                  <div class="w-2 h-2 rounded-full shadow-sm" :class="getLatencyColor(getLatency(connection))"></div>
+                  <div class="w-2 h-2 rounded-full" :class="getLatencyColor(getLatency(connection))"></div>
                   <span class="font-mono font-medium">{{ connection.latency_display ||
                     formatLatency(getLatency(connection)) }}</span>
                 </div>
