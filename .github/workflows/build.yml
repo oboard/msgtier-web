@@ -22,12 +22,14 @@ jobs:
     - name: Build
       run: bun run build
 
-    - name: Tar dist folder
+    - name: Zip dist folder
       run: |
-        tar -cf dist.tar -C dist .
+        cd dist
+        zip -r ../dist.zip .
+        cd ..
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: dist.tar
-        path: dist.tar
+        name: dist
+        path: dist.zip
