@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { apiData } from '../stores/data';
+import { nanoid } from 'nanoid';
 
 interface FileContent {
   id: string;
@@ -113,7 +114,7 @@ const sendMessage = async () => {
 
   // Optimistically add to UI
   messages.value.push({
-    id: crypto.randomUUID(),
+    id: nanoid(),
     source_id: apiData.value?.peer_id || 'me',
     target_id: selectedPeerId.value,
     kind: 'text',
@@ -161,7 +162,7 @@ const handleFileUpload = async (event: Event) => {
 
     // Optimistically add
     messages.value.push({
-      id: crypto.randomUUID(),
+      id: nanoid(),
       source_id: apiData.value?.peer_id || 'me',
       target_id: selectedPeerId.value!,
       kind: kind,
