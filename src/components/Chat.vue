@@ -128,10 +128,10 @@ const sendMessage = async () => {
 
 const handleFileUpload = async (event: Event) => {
   const file = (event.target as HTMLInputElement).files?.[0];
-  if (!file || !selectedPeerId.value || !socket.value) return;
+  if (!file) return;
 
   try {
-    // Upload file to object store
+    // Upload file content to object store
     const response = await fetch('/api/object', {
       method: 'POST',
       body: file
@@ -146,9 +146,11 @@ const handleFileUpload = async (event: Event) => {
 
     // Determine kind based on type
     const kind = file.type.startsWith('image/') ? 'image' : 'file';
+    
+    // Construct file content object
     const fileContent: FileContent = {
       id: objectId,
-      filename: file.name,
+      filename: file.name, // Use original filename for display
       type: file.type
     };
 
@@ -158,18 +160,20 @@ const handleFileUpload = async (event: Event) => {
       content: fileContent
     };
 
-    socket.value.send(JSON.stringify(payload));
-
-    // Optimistically add
-    messages.value.push({
-      id: nanoid(),
-      source_id: apiData.value?.peer_id || 'me',
-      target_id: selectedPeerId.value!,
-      kind: kind,
-      content: fileContent,
-      timestamp: Date.now(),
-      isSelf: true
-    });
+    if (socket.value && socket.value.readyState === WebSocket.OPEN) {
+      socket.value.send(JSON.stringify(payload));
+      
+      // Optimistically add
+      messages.value.push({
+        id: nanoid(),
+        source_id: apiData.value?.peer_id || 'me',
+        target_id: selectedPeerId.value!,
+        kind: kind,
+        content: fileContent,
+        timestamp: Date.now(),
+        isSelf: true
+      });
+    }
   } catch (e) {
     console.error('File upload error:', e);
     alert('Failed to upload file');
@@ -340,14 +344,14 @@ const getDownloadUrl = (msg: ChatMessage) => {
               </div>
 
               <!-- File Message -->
-              <div v-else
-                class="flex items-center gap-3 cursor-pointer hover:bg-base-content/10 p-2 rounded transition-colors"
-                @click="downloadFile(msg)">
-                <div class="p-2 bg-base-content/10 rounded-full">
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
-                    stroke="currentColor" class="w-6 h-6">
-                    <path stroke-linecap="round" stroke-linejoin="round"
-                      d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+              <a v-else
+                class="flex items-center gap-3 hover:bg-base-content/10 p-2 rounded transition-colors no-underline text-base-content"
+                :href="getDownloadUrl(msg)"
+                target="_blank"
+                :download="(msg.content as FileContent).filename || 'download'">
+                <div class="p-2 bg-base-content/10 rounded-full text-primary">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6">
+                    <path fill-rule="evenodd" d="M12 2.25a.75.75 0 01.75.75v11.69l3.22-3.22a.75.75 0 111.06 1.06l-4.5 4.5a.75.75 0 01-1.06 0l-4.5-4.5a.75.75 0 111.06-1.06l3.22 3.22V3a.75.75 0 01.75-.75zm-9 13.5a.75.75 0 01.75.75v2.25a1.5 1.5 0 001.5 1.5h13.5a1.5 1.5 0 001.5-1.5V16.5a.75.75 0 011.5 0v2.25a3 3 0 01-3 3H5.25a3 3 0 01-3-3V16.5a.75.75 0 01.75-.75z" clip-rule="evenodd" />
                   </svg>
                 </div>
                 <div class="flex flex-col">
@@ -356,11 +360,11 @@ const getDownloadUrl = (msg: ChatMessage) => {
                     }}</span>
                 </div>
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
-                  stroke="currentColor" class="w-4 h-4 ml-2 opacity-50">
+                  stroke="currentColor" class="w-5 h-5 ml-2 opacity-50">
                   <path stroke-linecap="round" stroke-linejoin="round"
                     d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M12 12v8.25m0 0l-3.75-3.75M12 20.25l3.75-3.75M12 3v9" />
                 </svg>
-              </div>
+              </a>
             </div>
           </div>
         </div>
