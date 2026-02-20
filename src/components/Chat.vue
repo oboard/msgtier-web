@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { apiData } from '../stores/data';
 import { nanoid } from 'nanoid';
 
@@ -192,11 +192,20 @@ onUnmounted(() => {
 });
 
 // Auto-scroll to bottom
-watch(currentMessages, () => {
-  setTimeout(() => {
-    const el = document.getElementById('chat-messages');
-    if (el) el.scrollTop = el.scrollHeight;
-  }, 50);
+watch(currentMessages, (newVal, oldVal) => {
+  const el = document.getElementById('chat-messages');
+  if (!el) return;
+
+  // Check if we are already at the bottom before the update (threshold 50px)
+  const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
+
+  nextTick(() => {
+    // Only scroll if we were at the bottom OR if the last message is from self
+    const lastMsg = newVal[newVal.length - 1];
+    if (isAtBottom || (lastMsg && lastMsg.isSelf)) {
+      el.scrollTop = el.scrollHeight;
+    }
+  });
 }, { deep: true });
 
 const formatTime = (ts: number) => new Date(ts).toLocaleTimeString();
@@ -349,7 +358,7 @@ const getDownloadUrl = (msg: ChatMessage) => {
                 :href="getDownloadUrl(msg)"
                 target="_blank"
                 :download="(msg.content as FileContent).filename || 'download'">
-                <div class="p-2 bg-base-content/10 rounded-full text-primary">
+                <div class="p-2 bg-base-content/10 rounded-full">
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6">
                     <path fill-rule="evenodd" d="M12 2.25a.75.75 0 01.75.75v11.69l3.22-3.22a.75.75 0 111.06 1.06l-4.5 4.5a.75.75 0 01-1.06 0l-4.5-4.5a.75.75 0 111.06-1.06l3.22 3.22V3a.75.75 0 01.75-.75zm-9 13.5a.75.75 0 01.75.75v2.25a1.5 1.5 0 001.5 1.5h13.5a1.5 1.5 0 001.5-1.5V16.5a.75.75 0 011.5 0v2.25a3 3 0 01-3 3H5.25a3 3 0 01-3-3V16.5a.75.75 0 01.75-.75z" clip-rule="evenodd" />
                   </svg>
@@ -359,11 +368,6 @@ const getDownloadUrl = (msg: ChatMessage) => {
                   <span class="text-xs opacity-70">{{ (msg.content as FileContent).type || 'application/octet-stream'
                     }}</span>
                 </div>
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
-                  stroke="currentColor" class="w-5 h-5 ml-2 opacity-50">
-                  <path stroke-linecap="round" stroke-linejoin="round"
-                    d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M12 12v8.25m0 0l-3.75-3.75M12 20.25l3.75-3.75M12 3v9" />
-                </svg>
               </a>
             </div>
           </div>
