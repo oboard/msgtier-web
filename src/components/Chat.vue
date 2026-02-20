@@ -223,7 +223,8 @@ const downloadFile = (msg: ChatMessage) => {
 
 const getDownloadUrl = (msg: ChatMessage) => {
   const content = msg.content as FileContent;
-  return `/api/object/${content.id}?peer=${msg.source_id}`;
+  const filename = encodeURIComponent(content.filename || 'file');
+  return `/api/object/${content.id}?peer=${msg.source_id}&filename=${filename}`;
 };
 </script>
 
