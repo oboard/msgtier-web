@@ -7,13 +7,14 @@ interface FileContent {
   id: string;
   filename: string;
   type: string;
+  size?: number;
 }
 
 interface ChatMessage {
   id: string;
   source_id: string;
   target_id: string;
-  kind: 'text' | 'file' | 'image';
+  kind: 'text' | 'file' | 'image' | 'video';
   content: string | FileContent;
   timestamp: number;
   isSelf: boolean;
@@ -88,7 +89,7 @@ const connect = () => {
         id: msg.id,
         source_id: msg.source_id,
         target_id: msg.target_id || 'broadcast',
-        kind: (msg.kind as 'text' | 'file' | 'image') || 'text',
+        kind: (msg.kind as 'text' | 'file' | 'image' | 'video') || 'text',
         content: msg.content,
         timestamp: msg.timestamp || Date.now(),
         isSelf: msg.source_id === apiData.value?.peer_id
@@ -145,13 +146,16 @@ const handleFileUpload = async (event: Event) => {
     const objectId = result.id;
 
     // Determine kind based on type
-    const kind = file.type.startsWith('image/') ? 'image' : 'file';
-    
+    const kind = file.type.startsWith('image/')
+      ? 'image'
+      : (file.type.startsWith('video/') ? 'video' : 'file');
+
     // Construct file content object
     const fileContent: FileContent = {
       id: objectId,
       filename: file.name, // Use original filename for display
-      type: file.type
+      type: file.type,
+      size: file.size
     };
 
     const payload = {
@@ -162,7 +166,7 @@ const handleFileUpload = async (event: Event) => {
 
     if (socket.value && socket.value.readyState === WebSocket.OPEN) {
       socket.value.send(JSON.stringify(payload));
-      
+
       // Optimistically add
       messages.value.push({
         id: nanoid(),
@@ -209,6 +213,36 @@ watch(currentMessages, (newVal, oldVal) => {
 }, { deep: true });
 
 const formatTime = (ts: number) => new Date(ts).toLocaleTimeString();
+
+const formatBytes = (size?: number) => {
+  if (!size || size <= 0) return '未知大小';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let value = size;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unitIndex]}`;
+};
+
+const copyText = async (msg: ChatMessage) => {
+  if (msg.kind !== 'text') return;
+  const text = String(msg.content ?? '');
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const el = document.createElement('textarea');
+    el.value = text;
+    el.style.position = 'fixed';
+    el.style.left = '-9999px';
+    document.body.appendChild(el);
+    el.focus();
+    el.select();
+    document.execCommand('copy');
+    document.body.removeChild(el);
+  }
+};
 
 const downloadFile = (msg: ChatMessage) => {
   const content = msg.content as FileContent;
@@ -345,29 +379,63 @@ const getDownloadUrl = (msg: ChatMessage) => {
 
             <div class="chat-bubble" :class="msg.isSelf ? 'chat-bubble-primary' : 'chat-bubble-secondary'">
               <!-- Text Message -->
-              <span v-if="msg.kind === 'text'" class="whitespace-pre-wrap">{{ msg.content }}</span>
+              <div v-if="msg.kind === 'text'" class="flex items-start gap-2">
+                <span class="whitespace-pre-wrap flex-1">{{ msg.content }}</span>
+                <button class="btn btn-ghost btn-square btn-xs" @click="copyText(msg)" title="复制">
+                  <svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'>
+                    <g id="copy_3_line" fill='none' fill-rule='evenodd'>
+                      <path
+                        d='M24 0v24H0V0zM12.593 23.258l-.011.002-.071.035-.02.004-.014-.004-.071-.035c-.01-.004-.019-.001-.024.005l-.004.01-.017.428.005.02.01.013.104.074.015.004.012-.004.104-.074.012-.016.004-.017-.017-.427c-.002-.01-.009-.017-.017-.018m.265-.113-.013.002-.185.093-.01.01-.003.011.018.43.005.012.008.007.201.093c.012.004.023 0 .029-.008l.004-.014-.034-.614c-.003-.012-.01-.02-.02-.022m-.715.002a.023.023 0 0 0-.027.006l-.006.014-.034.614c0 .012.007.02.017.024l.015-.002.201-.093.01-.008.004-.011.017-.43-.003-.012-.01-.01z' />
+                      <path fill='currentColor'
+                        d='M9 2a2 2 0 0 0-2 2v1a1 1 0 0 0 2 0V4h1a1 1 0 1 0 0-2zm5 0a1 1 0 1 0 0 2h1a1 1 0 1 0 0-2zm5 0a1 1 0 1 0 0 2h1v1a1 1 0 1 0 2 0V4a2 2 0 0 0-2-2zm3 7a1 1 0 1 0-2 0v1a1 1 0 1 0 2 0zm0 5a1 1 0 1 0-2 0v1h-1a1 1 0 1 0 0 2h1a2 2 0 0 0 2-2zM4 7a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2zm0 2h11v11H4z' />
+                    </g>
+                  </svg>
+                </button>
+              </div>
 
               <!-- Image Message -->
               <div v-else-if="msg.kind === 'image'" class="flex flex-col gap-2">
                 <img :src="getDownloadUrl(msg)" class="max-w-[200px] rounded-lg border border-base-content/20" />
-                <span class="text-xs opacity-70">{{ (msg.content as FileContent).filename }}</span>
+                <div class="flex items-center justify-between gap-2">
+                  <span class="text-xs opacity-70">{{ (msg.content as FileContent).filename }}</span>
+                  <button class="btn btn-ghost btn-xs" @click="downloadFile(msg)" title="下载">
+                    下载
+                  </button>
+                </div>
+              </div>
+
+              <div v-else-if="msg.kind === 'video'" class="flex flex-col gap-2">
+                <video controls class="max-w-[240px] rounded-lg border border-base-content/20">
+                  <source :src="getDownloadUrl(msg)" />
+                </video>
+                <div class="flex items-center justify-between gap-2">
+                  <span class="text-xs opacity-70">{{ (msg.content as FileContent).filename }}</span>
+                  <button class="btn btn-ghost btn-xs" @click="downloadFile(msg)" title="下载">
+                    下载
+                  </button>
+                </div>
               </div>
 
               <!-- File Message -->
               <a v-else
                 class="flex items-center gap-3 hover:bg-base-content/10 p-2 rounded transition-colors no-underline text-base-content"
-                :href="getDownloadUrl(msg)"
-                target="_blank"
+                :href="getDownloadUrl(msg)" target="_blank"
                 :download="(msg.content as FileContent).filename || 'download'">
                 <div class="p-2 bg-base-content/10 rounded-full">
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6">
-                    <path fill-rule="evenodd" d="M12 2.25a.75.75 0 01.75.75v11.69l3.22-3.22a.75.75 0 111.06 1.06l-4.5 4.5a.75.75 0 01-1.06 0l-4.5-4.5a.75.75 0 111.06-1.06l3.22 3.22V3a.75.75 0 01.75-.75zm-9 13.5a.75.75 0 01.75.75v2.25a1.5 1.5 0 001.5 1.5h13.5a1.5 1.5 0 001.5-1.5V16.5a.75.75 0 011.5 0v2.25a3 3 0 01-3 3H5.25a3 3 0 01-3-3V16.5a.75.75 0 01.75-.75z" clip-rule="evenodd" />
+                    <path fill-rule="evenodd"
+                      d="M12 2.25a.75.75 0 01.75.75v11.69l3.22-3.22a.75.75 0 111.06 1.06l-4.5 4.5a.75.75 0 01-1.06 0l-4.5-4.5a.75.75 0 111.06-1.06l3.22 3.22V3a.75.75 0 01.75-.75zm-9 13.5a.75.75 0 01.75.75v2.25a1.5 1.5 0 001.5 1.5h13.5a1.5 1.5 0 001.5-1.5V16.5a.75.75 0 011.5 0v2.25a3 3 0 01-3 3H5.25a3 3 0 01-3-3V16.5a.75.75 0 01.75-.75z"
+                      clip-rule="evenodd" />
                   </svg>
                 </div>
                 <div class="flex flex-col">
                   <span class="font-bold text-sm">{{ (msg.content as FileContent).filename || 'File' }}</span>
-                  <span class="text-xs opacity-70">{{ (msg.content as FileContent).type || 'application/octet-stream'
-                    }}</span>
+                  <span class="text-xs opacity-70">
+                    {{ (msg.content as FileContent).type || 'application/octet-stream' }}
+                  </span>
+                  <span class="text-xs opacity-70">
+                    {{ formatBytes((msg.content as FileContent).size) }}
+                  </span>
                 </div>
               </a>
             </div>
