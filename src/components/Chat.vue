@@ -29,6 +29,8 @@ const messageText = ref('');
 const selectedPeerId = ref<string | null>(null);
 const socket = ref<WebSocket | null>(null);
 const isConnected = ref(false);
+const lastPong = ref(0);
+let heartbeatTimer: number | null = null;
 const fileInput = ref<HTMLInputElement | null>(null);
 
 // Get peers from global store, excluding self, and add Broadcast
@@ -60,6 +62,26 @@ const currentMessages = computed(() => {
   }).sort((a, b) => a.timestamp - b.timestamp);
 });
 
+const stopHeartbeat = () => {
+  if (heartbeatTimer !== null) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+};
+
+const startHeartbeat = () => {
+  stopHeartbeat();
+  heartbeatTimer = window.setInterval(() => {
+    if (!socket.value || socket.value.readyState !== WebSocket.OPEN) return;
+    const now = Date.now();
+    if (lastPong.value && now - lastPong.value > 15000) {
+      socket.value.close();
+      return;
+    }
+    socket.value.send(JSON.stringify({ kind: 'ping' }));
+  }, 5000);
+};
+
 const connect = () => {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const wsUrl = `${protocol}//${window.location.host}/api/ws`;
@@ -68,14 +90,21 @@ const connect = () => {
 
   socket.value.onopen = () => {
     isConnected.value = true;
+    lastPong.value = Date.now();
+    startHeartbeat();
     console.log('WS Connected');
   };
 
   socket.value.onclose = () => {
     isConnected.value = false;
+    stopHeartbeat();
     console.log('WS Disconnected');
     // Reconnect after delay
     setTimeout(connect, 3000);
+  };
+
+  socket.value.onerror = () => {
+    socket.value?.close();
   };
 
   socket.value.onmessage = async (event) => {
@@ -83,7 +112,11 @@ const connect = () => {
       const msg = JSON.parse(event.data);
 
       // Filter system messages if any leak through
-      if (['ping', 'pong', 'sync'].includes(msg.kind)) return;
+      if (msg.kind === 'pong') {
+        lastPong.value = Date.now();
+        return;
+      }
+      if (['ping', 'sync'].includes(msg.kind)) return;
 
       const chatMsg: ChatMessage = {
         id: msg.id,
@@ -192,6 +225,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  stopHeartbeat();
   if (socket.value) socket.value.close();
 });
 
