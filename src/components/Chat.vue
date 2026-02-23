@@ -32,6 +32,8 @@ const isConnected = ref(false);
 const lastPong = ref(0);
 let heartbeatTimer: number | null = null;
 const fileInput = ref<HTMLInputElement | null>(null);
+const showLocalFileModal = ref(false);
+const localFilePath = ref('');
 
 // Get peers from global store, excluding self, and add Broadcast
 const peers = computed(() => {
@@ -221,9 +223,9 @@ const handleFileUpload = async (event: Event) => {
 };
 
 const handleLocalFileRegistration = async () => {
-  const path = window.prompt('Enter absolute local file path:');
-  if (!path || !path.trim()) return;
-
+  if (!localFilePath.value || !localFilePath.value.trim()) return;
+  const path = localFilePath.value;
+  
   try {
     const response = await fetch('/api/object/register', {
       method: 'POST',
@@ -269,6 +271,11 @@ const handleLocalFileRegistration = async () => {
         isSelf: true
       });
     }
+    
+    // Close modal and clear input
+    showLocalFileModal.value = false;
+    localFilePath.value = '';
+    
   } catch (e) {
     console.error('Local file registration error:', e);
     alert('Failed to register local file');
@@ -533,7 +540,7 @@ const getDownloadUrl = (msg: ChatMessage) => {
 
         <!-- Input Area -->
         <div class="p-4 border-t border-base-300 bg-base-100 flex gap-2 items-center">
-          <button class="btn btn-circle btn-ghost text-base-content/70 hover:bg-base-200" @click="handleLocalFileRegistration"
+          <button class="btn btn-circle btn-ghost text-base-content/70 hover:bg-base-200" @click="showLocalFileModal = true"
             title="Send Local File Path (Zero Copy)">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
               <path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" />
@@ -563,5 +570,21 @@ const getDownloadUrl = (msg: ChatMessage) => {
         </div>
       </template>
     </div>
+
+    <!-- DaisyUI Modal -->
+    <dialog class="modal" :class="{ 'modal-open': showLocalFileModal }">
+      <div class="modal-box">
+        <h3 class="font-bold text-lg">Send Local File</h3>
+        <p class="py-4">Enter the absolute path to a file on the server:</p>
+        <input type="text" v-model="localFilePath" placeholder="/path/to/file.ext" class="input input-bordered w-full" @keyup.enter="handleLocalFileRegistration" />
+        <div class="modal-action">
+          <button class="btn" @click="showLocalFileModal = false">Cancel</button>
+          <button class="btn btn-primary" @click="handleLocalFileRegistration" :disabled="!localFilePath.trim()">Send</button>
+        </div>
+      </div>
+      <form method="dialog" class="modal-backdrop">
+        <button @click="showLocalFileModal = false">close</button>
+      </form>
+    </dialog>
   </div>
 </template>
