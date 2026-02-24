@@ -13,7 +13,7 @@ const router = createRouter({
       component: HomeView
     },
     {
-      path: '/chat',
+      path: '/chat/:peerId?',
       name: 'chat',
       component: ChatView
     },
