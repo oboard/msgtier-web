@@ -2,7 +2,6 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { apiData } from '../stores/data';
-import { nanoid } from 'nanoid';
 
 interface FileContent {
   id: string;
@@ -153,17 +152,6 @@ const sendMessage = async () => {
 
   socket.value.send(JSON.stringify(payload));
 
-  // Optimistically add to UI
-  messages.value.push({
-    id: nanoid(),
-    source_id: apiData.value?.peer_id || 'me',
-    target_id: selectedPeerId.value,
-    kind: 'text',
-    content: messageText.value,
-    timestamp: Date.now(),
-    isSelf: true
-  });
-
   messageText.value = '';
 };
 
@@ -206,17 +194,6 @@ const handleFileUpload = async (event: Event) => {
 
     if (socket.value && socket.value.readyState === WebSocket.OPEN) {
       socket.value.send(JSON.stringify(payload));
-
-      // Optimistically add
-      messages.value.push({
-        id: nanoid(),
-        source_id: apiData.value?.peer_id || 'me',
-        target_id: selectedPeerId.value!,
-        kind: kind,
-        content: fileContent,
-        timestamp: Date.now(),
-        isSelf: true
-      });
     }
   } catch (e) {
     console.error('File upload error:', e);
@@ -265,16 +242,6 @@ const handleLocalFileRegistration = async () => {
 
     if (socket.value && socket.value.readyState === WebSocket.OPEN) {
       socket.value.send(JSON.stringify(payload));
-
-      messages.value.push({
-        id: nanoid(),
-        source_id: apiData.value?.peer_id || 'me',
-        target_id: selectedPeerId.value!,
-        kind: 'file',
-        content: fileContent,
-        timestamp: Date.now(),
-        isSelf: true
-      });
     }
 
     // Close modal and clear input
