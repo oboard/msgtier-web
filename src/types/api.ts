@@ -1,7 +1,7 @@
 export interface Peer {
   id: string;
   version: string;
-  metadata: any | null;
+  metadata: Record<string, string> | null;
   public_key: string;
   addresses: string[];
   connections: Connection[];
