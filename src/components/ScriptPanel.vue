@@ -7,6 +7,7 @@ interface ScriptRunState {
   loading: boolean;
   output: string;
   error: string | null;
+  statusCode: number | null;
 }
 
 const extraArgsByPeer = reactive<Record<string, string>>({});
@@ -58,9 +59,18 @@ function getRunState(key: string): ScriptRunState {
       loading: false,
       output: "",
       error: null,
+      statusCode: null,
     };
   }
   return runStateByKey[key];
+}
+
+function normalizeOutput(raw: string): string {
+  if (!raw) return "";
+  // Strip ANSI escape sequences (common in terminal tools like fastfetch)
+  const noAnsi = raw.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "");
+  // Remove NUL and other non-printable controls except newline/tab
+  return noAnsi.replace(/[\x00-\x08\x0B-\x1F\x7F]/g, "");
 }
 
 async function runScript(peer: Peer, scriptName: string): Promise<void> {
@@ -71,6 +81,7 @@ async function runScript(peer: Peer, scriptName: string): Promise<void> {
 
   state.loading = true;
   state.error = null;
+  state.statusCode = null;
   lastRunKey.value = key;
 
   try {
@@ -85,11 +96,12 @@ async function runScript(peer: Peer, scriptName: string): Promise<void> {
       body: command,
     });
 
-    const output = await response.text();
+    const output = normalizeOutput(await response.text());
+    state.statusCode = response.status;
     if (!response.ok) {
       throw new Error(output || `Request failed: ${response.status}`);
     }
-    state.output = output;
+    state.output = output.length > 0 ? output : "(empty response)";
   } catch (error) {
     state.error = error instanceof Error ? error.message : "Unknown error";
   } finally {
@@ -156,6 +168,12 @@ async function runScript(peer: Peer, scriptName: string): Promise<void> {
       >
         <div class="text-xs font-mono text-base-content/70 mb-1">
           Last run: {{ lastRunKey }}
+        </div>
+        <div
+          v-if="runStateByKey[lastRunKey].statusCode !== null"
+          class="text-[11px] text-base-content/60 mb-2"
+        >
+          HTTP {{ runStateByKey[lastRunKey].statusCode }}
         </div>
         <div
           v-if="runStateByKey[lastRunKey].error"
