@@ -31,14 +31,13 @@ const lastRunKey = ref<string | null>(null);
 
 function parseScripts(peer: Peer): string[] {
   const raw = peer.metadata?.scripts;
-  if (!raw || typeof raw !== "string") {
+  if (!raw) {
     return [];
   }
 
   try {
-    const parsed: unknown = JSON.parse(raw);
-    if (Array.isArray(parsed)) {
-      return parsed
+    if (Array.isArray(raw)) {
+      return raw
         .filter((item): item is string => typeof item === "string")
         .map((name) => name.trim())
         .filter((name) => name.length > 0);
@@ -125,66 +124,41 @@ async function runScript(peer: Peer, scriptName: string): Promise<void> {
         </div>
       </div>
 
-      <div
-        v-if="peersWithScripts.length === 0"
-        class="alert alert-info text-sm"
-      >
+      <div v-if="peersWithScripts.length === 0" class="alert alert-info text-sm">
         No scripts discovered from node metadata.
       </div>
 
       <div v-else class="space-y-4 overflow-auto pr-1 max-h-[560px]">
-        <div
-          v-for="{ peer, scripts } in peersWithScripts"
-          :key="peer.id"
-          class="border border-base-300 rounded-lg p-3 bg-base-200/40"
-        >
+        <div v-for="{ peer, scripts } in peersWithScripts" :key="peer.id"
+          class="border border-base-300 rounded-lg p-3 bg-base-200/40">
           <div class="font-mono text-xs text-base-content/80 mb-2">
             {{ peer.id }}
           </div>
-          <input
-            v-model="extraArgsByPeer[peer.id]"
-            type="text"
-            class="input input-sm input-bordered w-full mb-2"
-            placeholder="附加参数，例如：--verbose 123"
-          />
+          <input v-model="extraArgsByPeer[peer.id]" type="text" class="input input-sm input-bordered w-full mb-2"
+            placeholder="附加参数，例如：--verbose 123" />
           <div class="flex flex-wrap gap-2">
-            <button
-              v-for="scriptName in scripts"
-              :key="`${peer.id}:${scriptName}`"
+            <button v-for="scriptName in scripts" :key="`${peer.id}:${scriptName}`"
               class="btn btn-sm btn-primary btn-outline"
               :class="{ 'btn-disabled': getRunState(`${peer.id}:${scriptName}`).loading }"
-              :disabled="getRunState(`${peer.id}:${scriptName}`).loading"
-              @click="runScript(peer, scriptName)"
-            >
+              :disabled="getRunState(`${peer.id}:${scriptName}`).loading" @click="runScript(peer, scriptName)">
               {{ scriptName }}
             </button>
           </div>
         </div>
       </div>
 
-      <div
-        v-if="lastRunKey && runStateByKey[lastRunKey]"
-        class="border border-base-300 rounded-lg p-3 bg-base-200/50"
-      >
+      <div v-if="lastRunKey && runStateByKey[lastRunKey]" class="border border-base-300 rounded-lg p-3 bg-base-200/50">
         <div class="text-xs font-mono text-base-content/70 mb-1">
           Last run: {{ lastRunKey }}
         </div>
-        <div
-          v-if="runStateByKey[lastRunKey].statusCode !== null"
-          class="text-[11px] text-base-content/60 mb-2"
-        >
+        <div v-if="runStateByKey[lastRunKey].statusCode !== null" class="text-[11px] text-base-content/60 mb-2">
           HTTP {{ runStateByKey[lastRunKey].statusCode }}
         </div>
-        <div
-          v-if="runStateByKey[lastRunKey].error"
-          class="text-error text-xs whitespace-pre-wrap"
-        >
+        <div v-if="runStateByKey[lastRunKey].error" class="text-error text-xs whitespace-pre-wrap">
           {{ runStateByKey[lastRunKey].error }}
         </div>
-        <pre
-          v-else
-          class="text-xs bg-base-100 rounded p-2 overflow-auto max-h-36 whitespace-pre-wrap break-all"
-        >{{ runStateByKey[lastRunKey].output }}</pre>
+        <pre v-else
+          class="text-xs bg-base-100 rounded p-2 overflow-auto max-h-36 whitespace-pre-wrap break-all">{{ runStateByKey[lastRunKey].output }}</pre>
       </div>
     </div>
   </div>
