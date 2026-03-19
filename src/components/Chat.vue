@@ -20,6 +20,29 @@ interface ChatMessage {
   isSelf: boolean;
 }
 
+interface RawChatMessage {
+  id?: string;
+  source_id?: string;
+  target_id?: string;
+  kind?: string;
+  content?: unknown;
+  timestamp?: number | string;
+}
+
+interface ChatHistoryResponse {
+  items?: RawChatMessage[];
+  has_more?: boolean;
+  next_before?: number | null;
+}
+
+interface HistoryState {
+  loading: boolean;
+  hasMore: boolean;
+  nextBefore: number | null;
+}
+
+const HISTORY_PAGE_SIZE = 30;
+
 const props = defineProps<{
   myId?: string;
 }>();
@@ -38,6 +61,10 @@ let heartbeatTimer: number | null = null;
 const fileInput = ref<HTMLInputElement | null>(null);
 const showLocalFileModal = ref(false);
 const localFilePath = ref('');
+const messagesContainer = ref<HTMLElement | null>(null);
+const historyByPeer = ref<Record<string, HistoryState>>({});
+const isPrependingHistory = ref(false);
+const shouldScrollToBottom = ref(false);
 
 // Get peers from global store, excluding self, and add Broadcast
 const peers = computed(() => {
@@ -67,6 +94,141 @@ const currentMessages = computed(() => {
       (m.target_id === selectedPeerId.value && m.isSelf);
   }).sort((a, b) => a.timestamp - b.timestamp);
 });
+
+const getHistoryState = (peerId: string): HistoryState => {
+  if (!historyByPeer.value[peerId]) {
+    historyByPeer.value[peerId] = {
+      loading: false,
+      hasMore: true,
+      nextBefore: null
+    };
+  }
+  return historyByPeer.value[peerId];
+};
+
+const currentHistoryState = computed(() => {
+  if (!selectedPeerId.value) return null;
+  return getHistoryState(selectedPeerId.value);
+});
+
+const parseTimestamp = (value: unknown): number => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return Date.now();
+};
+
+const normalizeContent = (kind: ChatMessage['kind'], content: unknown): string | FileContent => {
+  if (kind === 'text') {
+    if (typeof content === 'string') return content;
+    if (content == null) return '';
+    return String(content);
+  }
+
+  if (content && typeof content === 'object') {
+    const payload = content as Record<string, unknown>;
+    return {
+      id: String(payload.id ?? ''),
+      filename: String(payload.filename ?? 'file'),
+      type: String(payload.type ?? 'application/octet-stream'),
+      size: typeof payload.size === 'number' ? payload.size : undefined
+    };
+  }
+
+  return {
+    id: '',
+    filename: 'file',
+    type: 'application/octet-stream'
+  };
+};
+
+const normalizeMessage = (raw: RawChatMessage): ChatMessage | null => {
+  if (!raw.id || !raw.source_id) return null;
+  const rawKind = raw.kind;
+  const kind: ChatMessage['kind'] = rawKind === 'file' || rawKind === 'image' || rawKind === 'video'
+    ? rawKind
+    : 'text';
+
+  return {
+    id: raw.id,
+    source_id: raw.source_id,
+    target_id: raw.target_id || 'broadcast',
+    kind,
+    content: normalizeContent(kind, raw.content),
+    timestamp: parseTimestamp(raw.timestamp),
+    isSelf: raw.source_id === apiData.value?.peer_id
+  };
+};
+
+const upsertMessage = (msg: ChatMessage) => {
+  const idx = messages.value.findIndex(m => m.id === msg.id);
+  if (idx >= 0) {
+    messages.value[idx] = msg;
+  } else {
+    messages.value.push(msg);
+  }
+};
+
+const fetchHistory = async (peerId: string, reset: boolean) => {
+  const state = getHistoryState(peerId);
+  if (state.loading) return;
+  if (!reset && !state.hasMore) return;
+
+  const container = messagesContainer.value;
+  const prevHeight = container?.scrollHeight ?? 0;
+  const prevTop = container?.scrollTop ?? 0;
+
+  state.loading = true;
+  try {
+    const params = new URLSearchParams();
+    params.set('peer', peerId);
+    params.set('limit', String(HISTORY_PAGE_SIZE));
+    if (!reset && state.nextBefore !== null) {
+      params.set('before', String(state.nextBefore));
+    }
+    const response = await fetch(`/api/chat/messages?${params.toString()}`);
+    if (!response.ok) throw new Error(`History fetch failed: ${response.status}`);
+
+    const payload = await response.json() as ChatHistoryResponse;
+    const incoming = (payload.items || [])
+      .map(normalizeMessage)
+      .filter((msg): msg is ChatMessage => msg !== null);
+
+    if (!reset && incoming.length > 0) {
+      isPrependingHistory.value = true;
+    }
+    incoming.forEach(upsertMessage);
+
+    state.hasMore = Boolean(payload.has_more);
+    state.nextBefore = typeof payload.next_before === 'number' ? payload.next_before : null;
+
+    await nextTick();
+    const currentPeer = selectedPeerId.value;
+    if (currentPeer !== peerId) return;
+
+    if (isPrependingHistory.value && container) {
+      const newHeight = container.scrollHeight;
+      container.scrollTop = prevTop + (newHeight - prevHeight);
+      isPrependingHistory.value = false;
+    } else if (reset) {
+      shouldScrollToBottom.value = true;
+    }
+  } catch (e) {
+    console.error('Failed to fetch chat history:', e);
+  } finally {
+    state.loading = false;
+  }
+};
+
+const onMessagesScroll = () => {
+  const container = messagesContainer.value;
+  const peerId = selectedPeerId.value;
+  if (!container || !peerId) return;
+  if (container.scrollTop > 80) return;
+  fetchHistory(peerId, false);
+};
 
 const stopHeartbeat = () => {
   if (heartbeatTimer !== null) {
@@ -115,7 +277,7 @@ const connect = () => {
 
   socket.value.onmessage = async (event) => {
     try {
-      const msg = JSON.parse(event.data);
+      const msg = JSON.parse(event.data) as RawChatMessage;
 
       // Filter system messages if any leak through
       if (msg.kind === 'pong') {
@@ -124,17 +286,8 @@ const connect = () => {
       }
       if (['ping', 'sync'].includes(msg.kind)) return;
 
-      const chatMsg: ChatMessage = {
-        id: msg.id,
-        source_id: msg.source_id,
-        target_id: msg.target_id || 'broadcast',
-        kind: (msg.kind as 'text' | 'file' | 'image' | 'video') || 'text',
-        content: msg.content,
-        timestamp: msg.timestamp || Date.now(),
-        isSelf: msg.source_id === apiData.value?.peer_id
-      };
-
-      messages.value.push(chatMsg);
+      const chatMsg = normalizeMessage(msg);
+      if (chatMsg) upsertMessage(chatMsg);
     } catch (e) {
       console.error('Failed to parse message:', e);
     }
@@ -256,6 +409,9 @@ const handleLocalFileRegistration = async () => {
 
 onMounted(() => {
   connect();
+  if (selectedPeerId.value) {
+    fetchHistory(selectedPeerId.value, true);
+  }
 });
 
 onUnmounted(() => {
@@ -264,18 +420,20 @@ onUnmounted(() => {
 });
 
 // Auto-scroll to bottom
-watch(currentMessages, (newVal, oldVal) => {
-  const el = document.getElementById('chat-messages');
+watch(currentMessages, (newVal) => {
+  const el = messagesContainer.value;
   if (!el) return;
 
   // Check if we are already at the bottom before the update (threshold 50px)
   const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
 
   nextTick(() => {
+    if (isPrependingHistory.value) return;
     // Only scroll if we were at the bottom OR if the last message is from self
     const lastMsg = newVal[newVal.length - 1];
-    if (isAtBottom || (lastMsg && lastMsg.isSelf)) {
+    if (shouldScrollToBottom.value || isAtBottom || (lastMsg && lastMsg.isSelf)) {
       el.scrollTop = el.scrollHeight;
+      shouldScrollToBottom.value = false;
     }
   });
 }, { deep: true });
@@ -284,6 +442,10 @@ watch(currentMessages, (newVal, oldVal) => {
 watch(selectedPeerId, (newId) => {
   if (newId) {
     router.replace({ name: 'chat', params: { peerId: newId } });
+    const state = getHistoryState(newId);
+    state.hasMore = true;
+    state.nextBefore = null;
+    fetchHistory(newId, true);
   }
 });
 
@@ -442,7 +604,15 @@ const getDownloadUrl = (msg: ChatMessage) => {
         </div>
 
         <!-- Messages -->
-        <div id="chat-messages" class="flex-1 overflow-y-auto p-4 space-y-6 bg-base-200/30 scroll-smooth">
+        <div id="chat-messages" ref="messagesContainer" @scroll="onMessagesScroll"
+          class="flex-1 overflow-y-auto p-4 space-y-6 bg-base-200/30 scroll-smooth">
+          <div v-if="currentHistoryState?.loading" class="text-center text-xs opacity-60 py-2">
+            正在加载历史消息...
+          </div>
+          <div v-else-if="currentMessages.length > 0 && !currentHistoryState?.hasMore"
+            class="text-center text-xs opacity-50 py-2">
+            没有更多历史消息
+          </div>
           <div v-for="msg in currentMessages" :key="msg.id" class="chat group"
             :class="msg.isSelf ? 'chat-end' : 'chat-start'">
 
