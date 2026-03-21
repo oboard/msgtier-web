@@ -1,7 +1,33 @@
+export interface OpenClawChannelMeta {
+  id: string;
+  label: string;
+  platform: string;
+  agent_id: string;
+  api: string;
+  state: string;
+  gateway_port: number;
+}
+
+export interface Channel {
+  id: string;
+  type: string;
+  label: string;
+  state: string;
+  peer_id?: string;
+  meta?: OpenClawChannelMeta | Record<string, unknown>;
+}
+
+export interface PeerMetadata {
+  scripts?: string[];
+  channels?: Channel[];
+  openclaw?: OpenClawChannelMeta[];
+  [key: string]: unknown;
+}
+
 export interface Peer {
   id: string;
   version: string;
-  metadata: Record<string, string> | null;
+  metadata: PeerMetadata | null;
   public_key: string;
   addresses: string[];
   connections: Connection[];

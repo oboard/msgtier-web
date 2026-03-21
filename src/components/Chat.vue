@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { apiData } from '../stores/data';
+import type { Channel, OpenClawChannelMeta, Peer } from '../types/api';
 
 interface FileContent {
   id: string;
@@ -41,6 +42,17 @@ interface HistoryState {
   nextBefore: number | null;
 }
 
+interface ChatTarget {
+  id: string;
+  kind: 'broadcast' | 'peer' | 'channel';
+  label: string;
+  subtitle: string;
+  peerId?: string;
+  channelId?: string;
+  channelType?: string;
+  state?: string;
+}
+
 const HISTORY_PAGE_SIZE = 30;
 
 const props = defineProps<{
@@ -65,33 +77,87 @@ const messagesContainer = ref<HTMLElement | null>(null);
 const historyByPeer = ref<Record<string, HistoryState>>({});
 const isPrependingHistory = ref(false);
 const shouldScrollToBottom = ref(false);
+const pendingAgentRequest = ref(false);
 
-// Get peers from global store, excluding self, and add Broadcast
-const peers = computed(() => {
-  const list = [];
-  // Add Broadcast option
-  list.push({ id: 'broadcast', addresses: [] });
+const makeChannelConversationId = (peerId: string, channelId: string) => `channel::${peerId}::${channelId}`;
+
+const normalizeChannels = (peer: Peer): Channel[] => {
+  if (Array.isArray(peer.metadata?.channels)) return peer.metadata.channels;
+  if (Array.isArray(peer.metadata?.openclaw)) {
+    return peer.metadata.openclaw.map((entry) => ({
+      id: `openclaw:${entry.id}`,
+      type: 'openclaw',
+      label: entry.label,
+      state: entry.state,
+      meta: entry
+    }));
+  }
+  return [];
+};
+
+const targets = computed<ChatTarget[]>(() => {
+  const list: ChatTarget[] = [{
+    id: 'broadcast',
+    kind: 'broadcast',
+    label: 'Global Chat',
+    subtitle: 'Broadcast to all'
+  }];
 
   if (!apiData.value?.peers) return list;
   const myId = apiData.value.peer_id;
 
-  apiData.value.peers.forEach(p => {
-    if (p.id !== myId) list.push(p);
+  apiData.value.peers.forEach((peer) => {
+    const isSelfPeer = peer.id === myId;
+    if (!isSelfPeer) {
+      list.push({
+        id: peer.id,
+        kind: 'peer',
+        label: peer.id.length > 12 ? `${peer.id.substring(0, 12)}...` : peer.id,
+        subtitle: 'Direct Message',
+        peerId: peer.id
+      });
+    }
+
+    normalizeChannels(peer).forEach((channel) => {
+      list.push({
+        id: makeChannelConversationId(peer.id, channel.id),
+        kind: 'channel',
+        label: channel.label,
+        subtitle: `${isSelfPeer ? 'This node' : (peer.id.length > 12 ? `${peer.id.substring(0, 12)}...` : peer.id)} / ${channel.type}`,
+        peerId: peer.id,
+        channelId: channel.id,
+        channelType: channel.type,
+        state: channel.state
+      });
+    });
   });
+
   return list;
 });
 
-// Filter messages for selected peer
+const selectedTarget = computed(() => targets.value.find((target) => target.id === selectedPeerId.value) ?? null);
+const canUseAttachments = computed(() => selectedTarget.value?.kind !== 'channel');
+const canSendMessage = computed(() => {
+  if (!messageText.value.trim()) return false;
+  if (!selectedTarget.value) return false;
+  if (selectedTarget.value.kind === 'channel') {
+    return selectedTarget.value.state === 'ready' && !pendingAgentRequest.value;
+  }
+  return true;
+});
+
 const currentMessages = computed(() => {
-  if (!selectedPeerId.value) return [];
+  const target = selectedTarget.value;
+  if (!target) return [];
   return messages.value.filter(m => {
-    if (selectedPeerId.value === 'broadcast') {
-      // Show broadcast messages (target is null/undefined or 'broadcast')
+    if (target.kind === 'broadcast') {
       return !m.target_id || m.target_id === 'broadcast';
     }
-    // Direct messages
-    return (m.source_id === selectedPeerId.value && (m.target_id === apiData.value?.peer_id)) ||
-      (m.target_id === selectedPeerId.value && m.isSelf);
+    if (target.kind === 'channel') {
+      return m.source_id === target.id || m.target_id === target.id;
+    }
+    return (m.source_id === target.id && (m.target_id === apiData.value?.peer_id)) ||
+      (m.target_id === target.id && m.isSelf);
   }).sort((a, b) => a.timestamp - b.timestamp);
 });
 
@@ -169,6 +235,10 @@ const upsertMessage = (msg: ChatMessage) => {
   } else {
     messages.value.push(msg);
   }
+};
+
+const removeMessage = (id: string) => {
+  messages.value = messages.value.filter((msg) => msg.id !== id);
 };
 
 const fetchHistory = async (peerId: string, reset: boolean) => {
@@ -295,20 +365,133 @@ const connect = () => {
 };
 
 const sendMessage = async () => {
-  if (!messageText.value.trim() || !selectedPeerId.value || !socket.value) return;
+  const target = selectedTarget.value;
+  if (!messageText.value.trim() || !target) return;
 
-  const payload = {
-    target: selectedPeerId.value,
+  if (target.kind === 'channel') {
+    const prompt = messageText.value;
+    const now = Date.now();
+    const userTempId = `local-user-${now}`;
+    const assistantTempId = `local-assistant-${now}`;
+    upsertMessage({
+      id: userTempId,
+      source_id: apiData.value?.peer_id || 'self',
+      target_id: target.id,
+      kind: 'text',
+      content: prompt,
+      timestamp: now,
+      isSelf: true
+    });
+    upsertMessage({
+      id: assistantTempId,
+      source_id: target.id,
+      target_id: apiData.value?.peer_id || 'broadcast',
+      kind: 'text',
+      content: '',
+      timestamp: now + 1,
+      isSelf: false
+    });
+    pendingAgentRequest.value = true;
+    messageText.value = '';
+    try {
+      const response = await fetch('/api/channels/chat/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          peer_id: target.peerId,
+          channel_id: target.channelId,
+          channel_type: target.channelType,
+          messages: [{ role: 'user', content: prompt }],
+          session_key: `chat:${apiData.value?.peer_id}:${target.peerId}:${target.channelId}`,
+          stream: true
+        })
+      });
+
+      if (!response.ok) {
+        const errorPayload = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+        removeMessage(assistantTempId);
+        upsertMessage({
+          id: assistantTempId,
+          source_id: target.id,
+          target_id: apiData.value?.peer_id || 'broadcast',
+          kind: 'text',
+          content: typeof errorPayload.error === 'string' ? errorPayload.error : `HTTP ${response.status}`,
+          timestamp: Date.now(),
+          isSelf: false
+        });
+        removeMessage(userTempId);
+        await fetchHistory(target.id, true);
+        return;
+      }
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('Missing response stream');
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let streamedContent = '';
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split('\n\n');
+        buffer = events.pop() || '';
+        for (const eventBlock of events) {
+          const lines = eventBlock.split('\n');
+          let eventName = '';
+          let data = '';
+          for (const line of lines) {
+            if (line.startsWith('event:')) eventName = line.slice(6).trim();
+            if (line.startsWith('data:')) data += line.slice(5).trim();
+          }
+          if (!data) continue;
+          const payload = JSON.parse(data) as Record<string, unknown>;
+          if (eventName === 'delta') {
+            streamedContent += String(payload.delta ?? '');
+            upsertMessage({
+              id: assistantTempId,
+              source_id: target.id,
+              target_id: apiData.value?.peer_id || 'broadcast',
+              kind: 'text',
+              content: streamedContent,
+              timestamp: Date.now(),
+              isSelf: false
+            });
+          }
+        }
+      }
+      removeMessage(userTempId);
+      removeMessage(assistantTempId);
+      await fetchHistory(target.id, true);
+    } catch (error) {
+      removeMessage(assistantTempId);
+      upsertMessage({
+        id: assistantTempId,
+        source_id: target.id,
+        target_id: apiData.value?.peer_id || 'broadcast',
+        kind: 'text',
+        content: error instanceof Error ? error.message : 'Channel request failed',
+        timestamp: Date.now(),
+        isSelf: false
+      });
+      removeMessage(userTempId);
+    } finally {
+      pendingAgentRequest.value = false;
+    }
+    return;
+  }
+
+  if (!socket.value) return;
+  socket.value.send(JSON.stringify({
+    target: target.id,
     kind: 'text',
     content: messageText.value
-  };
-
-  socket.value.send(JSON.stringify(payload));
-
+  }));
   messageText.value = '';
 };
 
 const handleFileUpload = async (event: Event) => {
+  if (!canUseAttachments.value) return;
   const file = (event.target as HTMLInputElement).files?.[0];
   if (!file) return;
 
@@ -358,6 +541,7 @@ const handleFileUpload = async (event: Event) => {
 };
 
 const handleLocalFileRegistration = async () => {
+  if (!canUseAttachments.value) return;
   if (!localFilePath.value || !localFilePath.value.trim()) return;
   const path = localFilePath.value;
 
@@ -388,7 +572,7 @@ const handleLocalFileRegistration = async () => {
     };
 
     const payload = {
-      target: selectedPeerId.value,
+      target: selectedTarget.value?.id,
       kind: 'file',
       content: fileContent
     };
@@ -460,6 +644,21 @@ watch(() => route.params.peerId, (newId) => {
 
 const formatTime = (ts: number) => new Date(ts).toLocaleTimeString();
 
+const displayTargetLabel = (target: ChatTarget | null) => target?.label || '';
+const displayTargetSubtitle = (target: ChatTarget | null) => {
+  if (!target) return '';
+  if (target.kind === 'channel') {
+    return target.state === 'ready' ? target.subtitle : `${target.subtitle} / ${target.state}`;
+  }
+  return target.subtitle;
+};
+
+const displayMessageSource = (msg: ChatMessage) => {
+  if (msg.isSelf) return 'You';
+  if (selectedTarget.value?.kind === 'channel') return selectedTarget.value.label;
+  return msg.source_id;
+};
+
 const formatBytes = (size?: number) => {
   if (!size || size <= 0) return '未知大小';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -489,6 +688,119 @@ const copyText = async (msg: ChatMessage) => {
     document.body.removeChild(el);
   }
 };
+
+const escapeHtml = (input: string) => input
+  .replaceAll('&', '&amp;')
+  .replaceAll('<', '&lt;')
+  .replaceAll('>', '&gt;')
+  .replaceAll('"', '&quot;')
+  .replaceAll("'", '&#39;');
+
+const safeHref = (href: string) => /^(https?:|mailto:)/i.test(href) ? href : '#';
+
+const renderInlineMarkdown = (input: string) => {
+  let html = escapeHtml(input);
+  html = html.replace(/`([^`]+)`/g, '<code class="px-1 py-0.5 rounded bg-base-300/60">$1</code>');
+  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, text, href) => `<a class="link" href="${safeHref(href)}" target="_blank" rel="noreferrer">${text}</a>`);
+  return html;
+};
+
+const renderSimpleMarkdown = (input: string) => {
+  const lines = input.replace(/\r\n/g, '\n').split('\n');
+  const html: string[] = [];
+  let inCodeBlock = false;
+  let codeLang = '';
+  let codeLines: string[] = [];
+  let inUl = false;
+  let inOl = false;
+
+  const closeLists = () => {
+    if (inUl) {
+      html.push('</ul>');
+      inUl = false;
+    }
+    if (inOl) {
+      html.push('</ol>');
+      inOl = false;
+    }
+  };
+
+  const flushCode = () => {
+    html.push(`<pre class="bg-base-300/60 rounded-lg p-3 overflow-x-auto"><code class="language-${escapeHtml(codeLang)}">${escapeHtml(codeLines.join('\n'))}</code></pre>`);
+    codeLines = [];
+    codeLang = '';
+  };
+
+  for (const line of lines) {
+    if (line.startsWith('```')) {
+      closeLists();
+      if (inCodeBlock) {
+        flushCode();
+        inCodeBlock = false;
+      } else {
+        inCodeBlock = true;
+        codeLang = line.slice(3).trim();
+      }
+      continue;
+    }
+    if (inCodeBlock) {
+      codeLines.push(line);
+      continue;
+    }
+    if (!line.trim()) {
+      closeLists();
+      continue;
+    }
+    const heading = line.match(/^(#{1,6})\s+(.*)$/);
+    if (heading) {
+      closeLists();
+      const level = heading[1].length;
+      html.push(`<h${level} class="font-bold my-2">${renderInlineMarkdown(heading[2])}</h${level}>`);
+      continue;
+    }
+    const quote = line.match(/^>\s?(.*)$/);
+    if (quote) {
+      closeLists();
+      html.push(`<blockquote class="border-l-4 border-base-content/20 pl-3 opacity-90">${renderInlineMarkdown(quote[1])}</blockquote>`);
+      continue;
+    }
+    const ordered = line.match(/^\d+\.\s+(.*)$/);
+    if (ordered) {
+      if (inUl) {
+        html.push('</ul>');
+        inUl = false;
+      }
+      if (!inOl) {
+        html.push('<ol class="list-decimal pl-5 space-y-1">');
+        inOl = true;
+      }
+      html.push(`<li>${renderInlineMarkdown(ordered[1])}</li>`);
+      continue;
+    }
+    const unordered = line.match(/^[-*+]\s+(.*)$/);
+    if (unordered) {
+      if (inOl) {
+        html.push('</ol>');
+        inOl = false;
+      }
+      if (!inUl) {
+        html.push('<ul class="list-disc pl-5 space-y-1">');
+        inUl = true;
+      }
+      html.push(`<li>${renderInlineMarkdown(unordered[1])}</li>`);
+      continue;
+    }
+    closeLists();
+    html.push(`<p>${renderInlineMarkdown(line)}</p>`);
+  }
+  closeLists();
+  if (inCodeBlock) flushCode();
+  return html.join('');
+};
+
+const renderMessageText = (msg: ChatMessage) => renderSimpleMarkdown(String(msg.content ?? ''));
 
 const downloadFile = (msg: ChatMessage) => {
   const content = msg.content as FileContent;
@@ -522,33 +834,41 @@ const getDownloadUrl = (msg: ChatMessage) => {
       </div>
       <div class="overflow-y-auto flex-1 px-2 pb-2">
         <ul class="menu w-full p-0 gap-1">
-          <li v-for="peer in peers" :key="peer.id">
-            <a @click="selectedPeerId = peer.id" :class="{ 'active': selectedPeerId === peer.id }"
+          <li v-for="target in targets" :key="target.id">
+            <a @click="selectedPeerId = target.id" :class="{ 'active': selectedPeerId === target.id }"
               class="flex items-center gap-3 py-3 px-4 rounded-btn transition-all duration-200">
               <div class="w-10 h-10 rounded-full bg-base-300 flex items-center justify-center"
-                :class="{ 'ring-2 ring-primary ring-offset-2': selectedPeerId === peer.id }">
-                <svg v-if="peer.id === 'broadcast'" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
+                :class="{ 'ring-2 ring-primary ring-offset-2': selectedPeerId === target.id }">
+                <svg v-if="target.kind === 'broadcast'" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
                   stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
                   <path stroke-linecap="round" stroke-linejoin="round"
                     d="M10.34 15.84c-.688-.06-1.386-.09-2.09-.09H7.5a4.5 4.5 0 110-9h.75c.704 0 1.402-.03 2.09-.09m0 9.18c.253.962.584 1.892.985 2.783.247.55.06 1.21-.463 1.511l-.657.38c-.551.318-1.26.117-1.527-.461a20.845 20.845 0 01-1.44-4.282m3.102.069a18.03 18.03 0 01-.59-4.59c0-1.586.205-3.124.59-4.59m0 9.18a23.848 23.848 0 018.835 2.535M10.34 6.66a23.847 23.847 0 018.835-2.535m0 0A23.74 23.74 0 0018.795 3m.38 1.125a23.91 23.91 0 011.014 5.395m-1.014 8.855c-.118.38-.245.754-.38 1.125m.38-1.125a23.91 23.91 0 001.014-5.395m0-3.46c.495.43.816 1.035.816 1.73 0 .695-.321 1.3-.816 1.73m0-3.46a24.347 24.347 0 010 3.46" />
                 </svg>
-                <svg v-else xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
+                <svg v-else-if="target.kind === 'peer'" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
                   stroke="currentColor" class="w-6 h-6">
                   <path stroke-linecap="round" stroke-linejoin="round"
                     d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
                 </svg>
+                <svg v-else xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
+                  stroke="currentColor" class="w-6 h-6">
+                  <path stroke-linecap="round" stroke-linejoin="round"
+                    d="M9.813 15.904L9 18.75l-2.844.813a.75.75 0 000 1.438L9 21.75l.813 2.844a.75.75 0 001.438 0L12 21.75l2.844-.749a.75.75 0 000-1.438L12 18.75l-.749-2.846a.75.75 0 00-1.438 0zM17.25 8.25h.008v.008h-.008V8.25zM15.75 9.75h.008v.008h-.008V9.75zM18.75 9.75h.008v.008h-.008V9.75zM17.25 11.25h.008v.008h-.008v-.008zM17.25 6.75h.008v.008h-.008V6.75zM8.25 6h8.25A2.25 2.25 0 0118.75 8.25v5.25A2.25 2.25 0 0116.5 15.75H8.25A2.25 2.25 0 016 13.5V8.25A2.25 2.25 0 018.25 6z" />
+                </svg>
               </div>
               <div class="flex flex-col overflow-hidden">
                 <span class="font-bold truncate text-sm">
-                  {{ peer.id === 'broadcast' ? 'Global Chat' : peer.id.substring(0, 12) + '...' }}
+                  {{ target.label }}
                 </span>
                 <span class="text-xs opacity-50 truncate">
-                  {{ peer.id === 'broadcast' ? 'Broadcast to all' : 'Online' }}
+                  {{ target.subtitle }}
                 </span>
+              </div>
+              <div v-if="target.kind === 'channel'" class="badge badge-outline badge-xs ml-auto">
+                {{ target.state }}
               </div>
             </a>
           </li>
-          <li v-if="peers.length === 0" class="text-center opacity-50 p-8 flex flex-col items-center gap-2 mt-10">
+          <li v-if="targets.length === 0" class="text-center opacity-50 p-8 flex flex-col items-center gap-2 mt-10">
             <span class="text-5xl grayscale opacity-50">😴</span>
             <span class="font-medium">No peers found</span>
             <span class="text-xs">Waiting for connections...</span>
@@ -584,22 +904,29 @@ const getDownloadUrl = (msg: ChatMessage) => {
             </button>
 
             <div class="w-10 h-10 rounded-full bg-base-300 flex items-center justify-center">
-              <svg v-if="selectedPeerId === 'broadcast'" xmlns="http://www.w3.org/2000/svg" fill="none"
+              <svg v-if="selectedTarget?.kind === 'broadcast'" xmlns="http://www.w3.org/2000/svg" fill="none"
                 viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
                 <path stroke-linecap="round" stroke-linejoin="round"
                   d="M10.34 15.84c-.688-.06-1.386-.09-2.09-.09H7.5a4.5 4.5 0 110-9h.75c.704 0 1.402-.03 2.09-.09m0 9.18c.253.962.584 1.892.985 2.783.247.55.06 1.21-.463 1.511l-.657.38c-.551.318-1.26.117-1.527-.461a20.845 20.845 0 01-1.44-4.282m3.102.069a18.03 18.03 0 01-.59-4.59c0-1.586.205-3.124.59-4.59m0 9.18a23.848 23.848 0 018.835 2.535M10.34 6.66a23.847 23.847 0 018.835-2.535m0 0A23.74 23.74 0 0018.795 3m.38 1.125a23.91 23.91 0 011.014 5.395m-1.014 8.855c-.118.38-.245.754-.38 1.125m.38-1.125a23.91 23.91 0 001.014-5.395m0-3.46c.495.43.816 1.035.816 1.73 0 .695-.321 1.3-.816 1.73m0-3.46a24.347 24.347 0 010 3.46" />
               </svg>
-              <svg v-else xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
+              <svg v-else-if="selectedTarget?.kind === 'peer'" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
                 stroke="currentColor" class="w-6 h-6">
                 <path stroke-linecap="round" stroke-linejoin="round"
                   d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
               </svg>
+              <svg v-else xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
+                stroke="currentColor" class="w-6 h-6">
+                <path stroke-linecap="round" stroke-linejoin="round"
+                  d="M9.813 15.904L9 18.75l-2.844.813a.75.75 0 000 1.438L9 21.75l.813 2.844a.75.75 0 001.438 0L12 21.75l2.844-.749a.75.75 0 000-1.438L12 18.75l-.749-2.846a.75.75 0 00-1.438 0zM8.25 6h8.25A2.25 2.25 0 0118.75 8.25v5.25A2.25 2.25 0 0116.5 15.75H8.25A2.25 2.25 0 016 13.5V8.25A2.25 2.25 0 018.25 6z" />
+              </svg>
             </div>
             <div class="flex flex-col">
-              <span class="text-lg">{{ selectedPeerId === 'broadcast' ? 'Global Chat' : selectedPeerId.substring(0, 12)
-                + '...' }}</span>
-              <span class="text-xs opacity-50 font-normal" v-if="selectedPeerId !== 'broadcast'">Direct Message</span>
+              <span class="text-lg">{{ displayTargetLabel(selectedTarget) }}</span>
+              <span class="text-xs opacity-50 font-normal">{{ displayTargetSubtitle(selectedTarget) }}</span>
             </div>
+          </div>
+          <div v-if="selectedTarget?.kind === 'channel'" class="badge" :class="selectedTarget.state === 'ready' ? 'badge-success' : 'badge-warning'">
+            {{ selectedTarget.state }}
           </div>
         </div>
 
@@ -627,14 +954,14 @@ const getDownloadUrl = (msg: ChatMessage) => {
             </div>
 
             <div class="chat-header text-xs opacity-50 mb-1 flex items-center gap-2">
-              <span class="font-bold">{{ msg.isSelf ? 'You' : msg.source_id }}</span>
+              <span class="font-bold">{{ displayMessageSource(msg) }}</span>
               <time class="text-[10px]">{{ formatTime(msg.timestamp) }}</time>
             </div>
 
             <div class="chat-bubble" :class="msg.isSelf ? 'chat-bubble-primary' : 'chat-bubble-secondary'">
               <!-- Text Message -->
               <div v-if="msg.kind === 'text'" class="flex items-start gap-2">
-                <span class="whitespace-pre-wrap flex-1">{{ msg.content }}</span>
+                <div class="flex-1 min-w-0" v-html="renderMessageText(msg)"></div>
                 <button class="btn btn-ghost btn-square btn-xs" @click="copyText(msg)" title="复制">
                   <svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'>
                     <g id="copy_3_line" fill='none' fill-rule='evenodd'>
@@ -698,7 +1025,7 @@ const getDownloadUrl = (msg: ChatMessage) => {
 
         <!-- Input Area -->
         <div class="p-4 border-t border-base-300 bg-base-100 flex gap-2 items-center">
-          <button class="btn btn-circle btn-ghost text-base-content/70 hover:bg-base-200"
+          <button v-if="canUseAttachments" class="btn btn-circle btn-ghost text-base-content/70 hover:bg-base-200"
             @click="showLocalFileModal = true" title="Send Local File Path (Zero Copy)">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
               stroke="currentColor" class="w-6 h-6">
@@ -706,8 +1033,8 @@ const getDownloadUrl = (msg: ChatMessage) => {
                 d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" />
             </svg>
           </button>
-          <input type="file" ref="fileInput" class="hidden" @change="handleFileUpload" />
-          <button class="btn btn-circle btn-ghost text-base-content/70 hover:bg-base-200" @click="fileInput?.click()"
+          <input v-if="canUseAttachments" type="file" ref="fileInput" class="hidden" @change="handleFileUpload" />
+          <button v-if="canUseAttachments" class="btn btn-circle btn-ghost text-base-content/70 hover:bg-base-200" @click="fileInput?.click()"
             title="Send File">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
               stroke="currentColor" class="w-6 h-6">
@@ -716,11 +1043,12 @@ const getDownloadUrl = (msg: ChatMessage) => {
             </svg>
           </button>
 
-          <input v-model="messageText" @keyup.enter="sendMessage" type="text" placeholder="Type a message..."
+          <input v-model="messageText" @keyup.enter="sendMessage" type="text"
+            :placeholder="selectedTarget?.kind === 'channel' ? 'Ask channel...' : 'Type a message...'"
             class="input input-bordered flex-1 rounded-full focus:outline-none focus:ring-2 focus:ring-primary/50 bg-base-200/50" />
 
           <button class="btn btn-circle btn-primary transition-transform active:scale-95" @click="sendMessage"
-            :disabled="!messageText.trim()">
+            :disabled="!canSendMessage">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
               stroke="currentColor" class="w-5 h-5 translate-x-0.5">
               <path stroke-linecap="round" stroke-linejoin="round"
