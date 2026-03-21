@@ -8,6 +8,17 @@ export interface OpenClawChannelMeta {
   gateway_port: number;
 }
 
+export interface PortForwardMeta {
+  id: string;
+  protocol: string;
+  direction: 'forward' | 'expose';
+  state: string;
+  peer_id?: string;
+  peer_ids?: string[];
+  listen_host?: string;
+  listen_port?: number;
+}
+
 export interface Channel {
   id: string;
   type: string;
@@ -21,6 +32,7 @@ export interface PeerMetadata {
   scripts?: string[];
   channels?: Channel[];
   openclaw?: OpenClawChannelMeta[];
+  port_forwards?: PortForwardMeta[];
   [key: string]: unknown;
 }
 

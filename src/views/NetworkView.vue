@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import NetworkGraph from "../components/NetworkGraph.vue";
+import PortForwardsPanel from "../components/PortForwardsPanel.vue";
 import ScriptPanel from "../components/ScriptPanel.vue";
 </script>
 
@@ -8,7 +9,8 @@ import ScriptPanel from "../components/ScriptPanel.vue";
     <div class="xl:col-span-2 min-h-[600px]">
       <NetworkGraph />
     </div>
-    <div class="xl:col-span-1">
+    <div class="xl:col-span-1 space-y-6">
+      <PortForwardsPanel />
       <ScriptPanel />
     </div>
   </div>
