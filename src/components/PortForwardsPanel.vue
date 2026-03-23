@@ -36,10 +36,7 @@ function formatPeer(rule: PortForwardMeta): string {
   if (rule.direction === "forward") {
     return rule.peer_id || "-";
   }
-  if (Array.isArray(rule.peer_ids) && rule.peer_ids.length > 0) {
-    return rule.peer_ids.join(", ");
-  }
-  return "-";
+  return "Matched by peer + key";
 }
 
 function formatEndpoint(rule: PortForwardMeta): string {

@@ -14,7 +14,6 @@ export interface PortForwardMeta {
   direction: 'forward' | 'expose';
   state: string;
   peer_id?: string;
-  peer_ids?: string[];
   listen_host?: string;
   listen_port?: number;
 }
