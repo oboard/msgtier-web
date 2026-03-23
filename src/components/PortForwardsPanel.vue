@@ -423,21 +423,21 @@ function formatExposeSummary(rule: PortForwardMeta): string {
               Save `forwards` and `exposes` for a selected node using the hot reload API.
             </p>
           </div>
-          <div class="grid gap-3 md:grid-cols-2">
-            <label class="form-control">
-              <span class="label-text text-xs uppercase tracking-[0.18em] text-base-content/50">Node</span>
-              <select v-model="selectedNodeId" class="select select-bordered select-sm min-w-48">
-                <option v-for="item in nodeOptions" :key="item.id" :value="item.id">
-                  {{ item.id }}{{ item.self ? " (local)" : "" }}
-                </option>
-              </select>
-            </label>
+        <div class="grid gap-3 lg:grid-cols-2">
+          <label class="form-control">
+            <span class="label-text text-xs uppercase tracking-[0.18em] text-base-content/50">Node</span>
+            <select v-model="selectedNodeId" class="select select-bordered select-sm w-full">
+              <option v-for="item in nodeOptions" :key="item.id" :value="item.id">
+                {{ item.id }}{{ item.self ? " (local)" : "" }}
+              </option>
+            </select>
+          </label>
             <label class="form-control">
               <span class="label-text text-xs uppercase tracking-[0.18em] text-base-content/50">Request secret</span>
               <input
                 v-model="authSecret"
                 type="password"
-                class="input input-bordered input-sm min-w-48"
+                class="input input-bordered input-sm w-full"
                 placeholder="Optional hot_reload secret"
               />
             </label>
@@ -467,15 +467,15 @@ function formatExposeSummary(rule: PortForwardMeta): string {
                 :key="`forward-${index}`"
                 class="grid gap-2 rounded-xl border border-base-300 bg-base-100 p-3"
               >
-                <div class="grid gap-2 md:grid-cols-[minmax(0,0.8fr)_minmax(0,0.8fr)_minmax(0,1.4fr)_auto]">
-                  <input v-model="row.peerId" class="input input-bordered input-sm" placeholder="peer id" />
-                  <input v-model="row.ruleId" class="input input-bordered input-sm" placeholder="rule id" />
+                <div class="grid gap-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,2.1fr)_auto] xl:items-center">
+                  <input v-model="row.peerId" class="input input-bordered input-sm w-full" placeholder="peer id" />
+                  <input v-model="row.ruleId" class="input input-bordered input-sm w-full" placeholder="rule id" />
                   <input
                     v-model="row.spec"
-                    class="input input-bordered input-sm font-mono"
+                    class="input input-bordered input-sm w-full font-mono"
                     placeholder="tcp://127.0.0.1:10022"
                   />
-                  <button class="btn btn-sm btn-ghost" type="button" @click="removeForwardRow(index)">Remove</button>
+                  <button class="btn btn-sm btn-ghost xl:justify-self-end" type="button" @click="removeForwardRow(index)">Remove</button>
                 </div>
               </div>
             </div>
@@ -496,14 +496,14 @@ function formatExposeSummary(rule: PortForwardMeta): string {
                 :key="`expose-${index}`"
                 class="grid gap-2 rounded-xl border border-base-300 bg-base-100 p-3"
               >
-                <div class="grid gap-2 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.6fr)_auto]">
-                  <input v-model="row.ruleId" class="input input-bordered input-sm" placeholder="rule id" />
+                <div class="grid gap-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,2.3fr)_auto] xl:items-center">
+                  <input v-model="row.ruleId" class="input input-bordered input-sm w-full" placeholder="rule id" />
                   <input
                     v-model="row.spec"
-                    class="input input-bordered input-sm font-mono"
+                    class="input input-bordered input-sm w-full font-mono"
                     placeholder="tcp://127.0.0.1:22"
                   />
-                  <button class="btn btn-sm btn-ghost" type="button" @click="removeExposeRow(index)">Remove</button>
+                  <button class="btn btn-sm btn-ghost xl:justify-self-end" type="button" @click="removeExposeRow(index)">Remove</button>
                 </div>
               </div>
             </div>
