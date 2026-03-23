@@ -84,6 +84,41 @@ export interface Route {
   timestamp: string;
 }
 
+export interface HotReloadSettings {
+  enable?: boolean | null;
+  secret?: string | null;
+}
+
+export interface StaticConfigLayer {
+  id: string;
+  secret: string;
+  peers: string[];
+  listeners: string[];
+  web_api?: string | null;
+}
+
+export interface HotConfigLayer {
+  scripts?: Record<string, string> | null;
+  metadata?: Record<string, string> | null;
+  openclaw?: boolean | null;
+  openclaw_plugin_version?: string | null;
+  openclaw_token?: string | null;
+  forwards?: Record<string, string> | null;
+  exposes?: Record<string, string> | null;
+  log?: string | null;
+  relay_network_whitelist?: string[] | null;
+  relay_all_peer_rpc?: boolean | null;
+  foreign_relay_bps_limit?: number | null;
+  upload_dir?: string | null;
+  disable_encryption?: boolean | null;
+  hot_reload?: HotReloadSettings | null;
+}
+
+export interface ConfigResponse extends StaticConfigLayer, HotConfigLayer {
+  static_config: StaticConfigLayer;
+  hot_config: HotConfigLayer;
+}
+
 export interface ApiResponse {
   status: string;
   peers: Peer[];
