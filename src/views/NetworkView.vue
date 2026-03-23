@@ -5,13 +5,15 @@ import ScriptPanel from "../components/ScriptPanel.vue";
 </script>
 
 <template>
-  <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
-    <div class="xl:col-span-2 min-h-[600px]">
+  <div class="grid grid-cols-1 gap-6 xl:grid-cols-3 xl:items-start">
+    <div class="xl:col-span-2 min-h-[320px] md:min-h-[480px] xl:min-h-[600px]">
       <NetworkGraph />
     </div>
-    <div class="xl:col-span-1 space-y-6">
-      <PortForwardsPanel />
-      <ScriptPanel />
+    <div class="xl:col-span-1 xl:h-[600px] xl:overflow-y-auto xl:pr-1">
+      <div class="space-y-6">
+        <PortForwardsPanel />
+        <ScriptPanel />
+      </div>
     </div>
   </div>
 </template>

@@ -128,8 +128,9 @@ function hydrateForm(config: ConfigResponse): void {
 
 function buildConfigUrl(peerId: string, path: string): string {
   const localPeerId = apiData.value?.peer_id;
+  const localPath = path.startsWith("/api/") ? path.slice(4) : path;
   if (!localPeerId || peerId === localPeerId) {
-    return `${apiUrl.value}${path}`;
+    return `${apiUrl.value}${localPath}`;
   }
   const query = new URLSearchParams({
     peer: peerId,
