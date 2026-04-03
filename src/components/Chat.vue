@@ -490,54 +490,86 @@ const sendMessage = async () => {
   messageText.value = '';
 };
 
+const normalizeAttachmentFileName = (file: File, fallbackPrefix: string) => {
+  if (file.name && file.name.trim()) return file.name;
+  const extension = file.type.split('/')[1]?.trim();
+  return extension ? `${fallbackPrefix}.${extension}` : fallbackPrefix;
+};
+
+const uploadAndSendFiles = async (files: File[]) => {
+  if (!canUseAttachments.value || files.length === 0) return;
+
+  for (const [index, file] of files.entries()) {
+    try {
+      const response = await fetch('/api/object', {
+        method: 'POST',
+        body: file
+      });
+
+      if (!response.ok) {
+        throw new Error('Upload failed');
+      }
+
+      const result = await response.json();
+      const objectId = result.id;
+
+      const kind = file.type.startsWith('image/')
+        ? 'image'
+        : (file.type.startsWith('video/') ? 'video' : 'file');
+
+      const fileContent: FileContent = {
+        id: objectId,
+        filename: normalizeAttachmentFileName(file, `pasted-file-${index + 1}`),
+        type: file.type || 'application/octet-stream',
+        size: file.size
+      };
+
+      const payload = {
+        target: selectedPeerId.value,
+        kind,
+        content: fileContent
+      };
+
+      if (socket.value && socket.value.readyState === WebSocket.OPEN) {
+        socket.value.send(JSON.stringify(payload));
+      }
+    } catch (e) {
+      console.error('File upload error:', e);
+      alert(`Failed to upload ${normalizeAttachmentFileName(file, `file-${index + 1}`)}`);
+    }
+  }
+};
+
 const handleFileUpload = async (event: Event) => {
+  const files = Array.from((event.target as HTMLInputElement).files || []);
+  await uploadAndSendFiles(files);
+
+  if (fileInput.value) fileInput.value.value = '';
+};
+
+const handlePaste = async (event: ClipboardEvent) => {
   if (!canUseAttachments.value) return;
-  const file = (event.target as HTMLInputElement).files?.[0];
-  if (!file) return;
+  const clipboard = event.clipboardData;
+  if (!clipboard) return;
 
-  try {
-    // Upload file content to object store
-    const response = await fetch('/api/object', {
-      method: 'POST',
-      body: file
-    });
-
-    if (!response.ok) {
-      throw new Error('Upload failed');
-    }
-
-    const result = await response.json();
-    const objectId = result.id;
-
-    // Determine kind based on type
-    const kind = file.type.startsWith('image/')
-      ? 'image'
-      : (file.type.startsWith('video/') ? 'video' : 'file');
-
-    // Construct file content object
-    const fileContent: FileContent = {
-      id: objectId,
-      filename: file.name, // Use original filename for display
-      type: file.type,
-      size: file.size
-    };
-
-    const payload = {
-      target: selectedPeerId.value,
-      kind: kind,
-      content: fileContent
-    };
-
-    if (socket.value && socket.value.readyState === WebSocket.OPEN) {
-      socket.value.send(JSON.stringify(payload));
-    }
-  } catch (e) {
-    console.error('File upload error:', e);
-    alert('Failed to upload file');
+  const files: File[] = [];
+  for (const item of Array.from(clipboard.items)) {
+    if (item.kind !== 'file') continue;
+    const file = item.getAsFile();
+    if (!file) continue;
+    const fallbackPrefix = item.type.startsWith('image/')
+      ? 'pasted-image'
+      : 'pasted-file';
+    files.push(new File([file], normalizeAttachmentFileName(file, fallbackPrefix), {
+      type: file.type || 'application/octet-stream',
+      lastModified: file.lastModified || Date.now()
+    }));
   }
 
-  // Reset input
-  if (fileInput.value) fileInput.value.value = '';
+  if (files.length === 0) return;
+
+  event.preventDefault();
+  await uploadAndSendFiles(files);
 };
 
 const handleLocalFileRegistration = async () => {
@@ -1043,7 +1075,7 @@ const getDownloadUrl = (msg: ChatMessage) => {
             </svg>
           </button>
 
-          <input v-model="messageText" @keyup.enter="sendMessage" type="text"
+          <input v-model="messageText" @keyup.enter="sendMessage" @paste="handlePaste" type="text"
             :placeholder="selectedTarget?.kind === 'channel' ? 'Ask channel...' : 'Type a message...'"
             class="input input-bordered flex-1 rounded-full focus:outline-none focus:ring-2 focus:ring-primary/50 bg-base-200/50" />
 
