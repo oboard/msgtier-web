@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { apiData } from '../stores/data';
-import type { Channel, OpenClawChannelMeta, Peer } from '../types/api';
+import type { Channel, Peer } from '../types/api';
 
 interface FileContent {
   id: string;
@@ -83,15 +83,6 @@ const makeChannelConversationId = (peerId: string, channelId: string) => `channe
 
 const normalizeChannels = (peer: Peer): Channel[] => {
   if (Array.isArray(peer.metadata?.channels)) return peer.metadata.channels;
-  if (Array.isArray(peer.metadata?.openclaw)) {
-    return peer.metadata.openclaw.map((entry) => ({
-      id: `openclaw:${entry.id}`,
-      type: 'openclaw',
-      label: entry.label,
-      state: entry.state,
-      meta: entry
-    }));
-  }
   return [];
 };
 

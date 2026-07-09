@@ -8,14 +8,9 @@ type TernaryValue = "null" | "true" | "false";
 interface ConfigFormState {
   scriptsText: string;
   metadataText: string;
-  forwardsText: string;
-  exposesText: string;
   whitelistText: string;
-  openclaw: TernaryValue;
   relayAllPeerRpc: TernaryValue;
   disableEncryption: TernaryValue;
-  openclawPluginVersion: string;
-  openclawToken: string;
   foreignRelayBpsLimit: string;
   uploadDir: string;
   hotReloadEnable: boolean;
@@ -68,14 +63,9 @@ function emptyFormState(): ConfigFormState {
   return {
     scriptsText: "{}",
     metadataText: "{}",
-    forwardsText: "{}",
-    exposesText: "{}",
     whitelistText: "",
-    openclaw: "null",
     relayAllPeerRpc: "null",
     disableEncryption: "null",
-    openclawPluginVersion: "",
-    openclawToken: "",
     foreignRelayBpsLimit: "",
     uploadDir: "",
     hotReloadEnable: true,
@@ -111,14 +101,9 @@ function hydrateForm(config: ConfigResponse): void {
   updateForm({
     scriptsText: prettyJson(hot.scripts ?? {}, "{}"),
     metadataText: prettyJson(hot.metadata ?? {}, "{}"),
-    forwardsText: prettyJson(hot.forwards ?? {}, "{}"),
-    exposesText: prettyJson(hot.exposes ?? {}, "{}"),
     whitelistText: Array.isArray(hot.relay_network_whitelist) ? hot.relay_network_whitelist.join("\n") : "",
-    openclaw: encodeTernary(hot.openclaw),
     relayAllPeerRpc: encodeTernary(hot.relay_all_peer_rpc),
     disableEncryption: encodeTernary(hot.disable_encryption),
-    openclawPluginVersion: hot.openclaw_plugin_version ?? "",
-    openclawToken: hot.openclaw_token ?? "",
     foreignRelayBpsLimit: hot.foreign_relay_bps_limit == null ? "" : String(hot.foreign_relay_bps_limit),
     uploadDir: hot.upload_dir ?? "",
     hotReloadEnable: hot.hot_reload?.enable ?? true,
@@ -171,12 +156,12 @@ function parseJsonMap(label: string, raw: string): Record<string, string> {
   return parsed as Record<string, string>;
 }
 
-function parseStringArray(raw: string): string[] | null {
+function parseStringArray(raw: string): string[] {
   const items = raw
     .split("\n")
     .map((item) => item.trim())
     .filter((item) => item.length > 0);
-  return items.length > 0 ? items : [];
+  return items;
 }
 
 function buildPatchPayload(): HotConfigLayer {
@@ -188,14 +173,9 @@ function buildPatchPayload(): HotConfigLayer {
   return {
     scripts: parseJsonMap("Scripts", form.scriptsText),
     metadata: parseJsonMap("Metadata", form.metadataText),
-    forwards: parseJsonMap("Forwards", form.forwardsText),
-    exposes: parseJsonMap("Exposes", form.exposesText),
     relay_network_whitelist: parseStringArray(form.whitelistText),
-    openclaw: decodeTernary(form.openclaw),
     relay_all_peer_rpc: decodeTernary(form.relayAllPeerRpc),
     disable_encryption: decodeTernary(form.disableEncryption),
-    openclaw_plugin_version: form.openclawPluginVersion.trim() || null,
-    openclaw_token: form.openclawToken.trim() || null,
     foreign_relay_bps_limit: foreignRelayBpsLimit ? Number(foreignRelayBpsLimit) : null,
     upload_dir: form.uploadDir.trim() || null,
     hot_reload: {
@@ -249,7 +229,7 @@ async function saveConfig(): Promise<void> {
         <div>
           <h3 class="card-title text-base">Config Hot Reload</h3>
           <p class="text-xs text-base-content/60">
-            Static config is read-only. Only runtime config is editable and `port` is no longer part of the form.
+            Static config is read-only. Port mappings are managed separately on the Port Mapping panel.
           </p>
         </div>
         <label class="form-control w-full lg:max-w-xs">
@@ -301,28 +281,9 @@ async function saveConfig(): Promise<void> {
           <span class="label-text">Metadata JSON</span>
           <textarea v-model="form.metadataText" class="textarea textarea-bordered min-h-40 font-mono text-xs" spellcheck="false"></textarea>
         </label>
-
-        <label class="form-control">
-          <span class="label-text">Forwards JSON</span>
-          <textarea v-model="form.forwardsText" class="textarea textarea-bordered min-h-40 font-mono text-xs" spellcheck="false"></textarea>
-        </label>
-
-        <label class="form-control">
-          <span class="label-text">Exposes JSON</span>
-          <textarea v-model="form.exposesText" class="textarea textarea-bordered min-h-40 font-mono text-xs" spellcheck="false"></textarea>
-        </label>
       </div>
 
-      <div v-if="configData" class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <label class="form-control">
-          <span class="label-text">OpenClaw</span>
-          <select v-model="form.openclaw" class="select select-bordered">
-            <option value="null">inherit</option>
-            <option value="true">true</option>
-            <option value="false">false</option>
-          </select>
-        </label>
-
+      <div v-if="configData" class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <label class="form-control">
           <span class="label-text">Relay All Peer RPC</span>
           <select v-model="form.relayAllPeerRpc" class="select select-bordered">
@@ -347,21 +308,11 @@ async function saveConfig(): Promise<void> {
         </label>
 
         <label class="form-control">
-          <span class="label-text">OpenClaw Plugin Version</span>
-          <input v-model="form.openclawPluginVersion" type="text" class="input input-bordered" placeholder="null" />
-        </label>
-
-        <label class="form-control">
-          <span class="label-text">OpenClaw Token</span>
-          <input v-model="form.openclawToken" type="text" class="input input-bordered" placeholder="null" />
-        </label>
-
-        <label class="form-control">
           <span class="label-text">Upload Dir</span>
           <input v-model="form.uploadDir" type="text" class="input input-bordered" placeholder="null" />
         </label>
 
-        <label class="form-control">
+        <label class="form-control xl:col-span-2">
           <span class="label-text">Relay Network Whitelist</span>
           <textarea v-model="form.whitelistText" class="textarea textarea-bordered min-h-28 text-xs" placeholder="One item per line"></textarea>
         </label>

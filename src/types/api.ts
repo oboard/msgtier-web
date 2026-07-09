@@ -1,17 +1,47 @@
-export interface OpenClawChannelMeta {
-  id: string;
-  label: string;
-  platform: string;
-  agent_id: string;
-  api: string;
-  state: string;
-  gateway_port: number;
+// Port scanning: what a node broadcasts about its own listening ports.
+export interface LocalPortEntry {
+  protocol: 'tcp' | 'udp' | string;
+  bind_addr: string;
+  port: number;
+  process_name?: string | null;
 }
 
+// A user-created forward: pull peer's remote_host:remote_port to local_host:local_port.
+export interface PortMappingRule {
+  id: string;
+  peer_id: string;
+  remote_protocol: string;
+  remote_host: string;
+  remote_port: number;
+  local_host: string;
+  local_port: number;
+  enabled: boolean;
+  created_at: number;
+  note?: string | null;
+}
+
+export interface PortScanPeersEntry {
+  last_updated: string;
+  ports: LocalPortEntry[];
+}
+
+export interface PortScanPeersResponse {
+  peers: Record<string, PortScanPeersEntry>;
+}
+
+export interface PortScanLocalResponse {
+  ports: LocalPortEntry[];
+}
+
+export interface PortMappingsResponse {
+  mappings: PortMappingRule[];
+}
+
+// Legacy runtime metadata about active mappings (still emitted in /api/status).
 export interface PortForwardMeta {
   id: string;
   protocol: string;
-  direction: 'forward' | 'expose';
+  direction: 'forward';
   state: string;
   peer_id?: string;
   listen_host?: string;
@@ -24,13 +54,12 @@ export interface Channel {
   label: string;
   state: string;
   peer_id?: string;
-  meta?: OpenClawChannelMeta | Record<string, unknown>;
+  meta?: Record<string, unknown>;
 }
 
 export interface PeerMetadata {
   scripts?: string[];
   channels?: Channel[];
-  openclaw?: OpenClawChannelMeta[];
   port_forwards?: PortForwardMeta[];
   [key: string]: unknown;
 }
@@ -47,17 +76,13 @@ export interface Peer {
 export interface Connection {
   peer_id: string;
   version?: string;
-  // active and state are removed in new structure
   relay: number;
-  // local_addr and remote_addr are removed in new structure
-  // latency_ms?: number; // kept as optional just in case
-  latency_ms?: number; // Example JSON shows latency_ms: 0 or 1000
-  latency_display?: string; // Not in JSON, maybe computed?
+  latency_ms?: number;
+  latency_display?: string;
   bandwidth_mbps: number;
-  bandwidth_display?: string; // Not in JSON
+  bandwidth_display?: string;
   packet_loss_rate: number;
-  packet_loss_display?: string; // Not in JSON
-  // New fields from JSON
+  packet_loss_display?: string;
   id?: string;
   last_seen?: string;
   quality?: number;
@@ -71,6 +96,7 @@ export interface Connection {
   ports?: PortMapping[];
 }
 
+// NAT-related mapping in connection info (unrelated to PortMappingRule above).
 export interface PortMapping {
   src: number;
   protocol: string;
@@ -100,11 +126,6 @@ export interface StaticConfigLayer {
 export interface HotConfigLayer {
   scripts?: Record<string, string> | null;
   metadata?: Record<string, string> | null;
-  openclaw?: boolean | null;
-  openclaw_plugin_version?: string | null;
-  openclaw_token?: string | null;
-  forwards?: Record<string, string> | null;
-  exposes?: Record<string, string> | null;
   log?: string | null;
   relay_network_whitelist?: string[] | null;
   relay_all_peer_rpc?: boolean | null;
@@ -122,13 +143,6 @@ export interface ConfigResponse extends StaticConfigLayer, HotConfigLayer {
 export interface ApiResponse {
   status: string;
   peers: Peer[];
-  // connections?: Connection[]; // This field seems to be gone from root in example.json, but was present in old structure.
-  // In example.json, root has `peers`, and `peers` have `connections`.
-  // However, the old code might rely on root.connections.
-  // The old `ConnectionsTable` checked `d?.connections || (d?.peers?.find((p) => p.id === d?.peer_id)?.connections)`.
-  // So if `connections` is missing from root, it falls back to finding the peer.
-  // But let's keep it optional for now or remove it if confirmed gone.
-  // Based on example.json, it's not at the root level anymore.
   peers_count: number;
   peer_id: string;
   listeners: string[];

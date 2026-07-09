@@ -1,525 +1,509 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { apiData, apiUrl } from "../stores/data";
-import type { ConfigResponse, Peer, PortForwardMeta } from "../types/api";
+import type {
+  LocalPortEntry,
+  PortMappingRule,
+  PortScanLocalResponse,
+  PortScanPeersResponse,
+  PortMappingsResponse,
+} from "../types/api";
 
-interface ForwardView {
-  owner: Peer;
-  targetPeer: Peer | null;
-  rule: PortForwardMeta;
-}
-
-interface ExposeView {
-  owner: Peer;
-  rule: PortForwardMeta;
-}
-
-interface ForwardRow {
+interface PeerPortView {
   peerId: string;
-  ruleId: string;
-  spec: string;
+  lastUpdated: string;
+  ports: LocalPortEntry[];
 }
 
-interface ExposeRow {
-  ruleId: string;
-  spec: string;
+interface PullDraft {
+  peerId: string;
+  remoteProtocol: string;
+  remoteHost: string;
+  remotePort: number;
+  suggestedLabel: string;
+  localHost: string;
+  localPort: string;
+  note: string;
 }
 
-const peers = computed(() => apiData.value?.peers ?? []);
-const selectedNodeId = ref("");
-const authSecret = ref("");
-const editorLoading = ref(false);
-const editorError = ref<string | null>(null);
-const editorSuccess = ref<string | null>(null);
-const forwardRows = reactive<ForwardRow[]>([]);
-const exposeRows = reactive<ExposeRow[]>([]);
+const localPorts = ref<LocalPortEntry[]>([]);
+const peerPorts = ref<PeerPortView[]>([]);
+const mappings = ref<PortMappingRule[]>([]);
 
-const nodeOptions = computed(() =>
-  peers.value
-    .map((peer) => ({ id: peer.id, self: peer.id === apiData.value?.peer_id }))
-    .sort((a, b) => a.id.localeCompare(b.id)),
+const loadingScan = ref(false);
+const loadingPeers = ref(false);
+const loadingMappings = ref(false);
+const refreshing = ref(false);
+const scanError = ref<string | null>(null);
+const peersError = ref<string | null>(null);
+const mappingsError = ref<string | null>(null);
+const createError = ref<string | null>(null);
+const createSuccess = ref<string | null>(null);
+
+const showPullDialog = ref(false);
+const pullDraft = reactive<PullDraft>(emptyDraft());
+let pollTimer: number | null = null;
+
+function emptyDraft(): PullDraft {
+  return {
+    peerId: "",
+    remoteProtocol: "tcp",
+    remoteHost: "127.0.0.1",
+    remotePort: 0,
+    suggestedLabel: "",
+    localHost: "127.0.0.1",
+    localPort: "",
+    note: "",
+  };
+}
+
+const selfPeerId = computed(() => apiData.value?.peer_id ?? "");
+
+const peerCount = computed(() => peerPorts.value.length);
+const totalPeerPorts = computed(() =>
+  peerPorts.value.reduce((total, p) => total + p.ports.length, 0),
+);
+const activeMappingCount = computed(
+  () => mappings.value.filter((m) => m.enabled).length,
 );
 
-const forwardViews = computed<ForwardView[]>(() =>
-  peers.value.flatMap((owner) => {
-    const rules = Array.isArray(owner.metadata?.port_forwards)
-      ? owner.metadata.port_forwards
-      : [];
-    return rules
-      .filter((rule) => rule.direction === "forward")
-      .map((rule) => ({
-        owner,
-        targetPeer: peers.value.find((peer) => peer.id === rule.peer_id) ?? null,
-        rule,
-      }));
-  }),
-);
+async function loadAll(): Promise<void> {
+  await Promise.all([loadLocalScan(), loadPeerScan(), loadMappings()]);
+}
 
-const exposeViews = computed<ExposeView[]>(() =>
-  peers.value.flatMap((owner) => {
-    const rules = Array.isArray(owner.metadata?.port_forwards)
-      ? owner.metadata.port_forwards
-      : [];
-    return rules
-      .filter((rule) => rule.direction === "expose")
-      .map((rule) => ({ owner, rule }));
-  }),
-);
+async function loadLocalScan(): Promise<void> {
+  loadingScan.value = true;
+  scanError.value = null;
+  try {
+    const response = await fetch(`${apiUrl.value}/port_scan/local`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = (await response.json()) as PortScanLocalResponse;
+    localPorts.value = Array.isArray(data.ports) ? data.ports : [];
+  } catch (error) {
+    localPorts.value = [];
+    scanError.value = error instanceof Error ? error.message : "Failed to load local scan";
+  } finally {
+    loadingScan.value = false;
+  }
+}
 
-const activeCount = computed(
-  () => forwardViews.value.filter(({ rule }) => rule.state === "listening").length,
-);
-
-watch(
-  () => [apiData.value?.peer_id, nodeOptions.value.map((item) => item.id).join(",")],
-  () => {
-    if (!selectedNodeId.value) {
-      selectedNodeId.value = apiData.value?.peer_id ?? "";
-    } else if (!nodeOptions.value.some((item) => item.id === selectedNodeId.value)) {
-      selectedNodeId.value = apiData.value?.peer_id ?? "";
+async function loadPeerScan(): Promise<void> {
+  loadingPeers.value = true;
+  peersError.value = null;
+  try {
+    const response = await fetch(`${apiUrl.value}/port_scan/peers`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = (await response.json()) as PortScanPeersResponse;
+    const rows: PeerPortView[] = [];
+    for (const [peerId, entry] of Object.entries(data.peers ?? {})) {
+      rows.push({
+        peerId,
+        lastUpdated: entry.last_updated ?? "0",
+        ports: Array.isArray(entry.ports) ? entry.ports : [],
+      });
     }
-  },
-  { immediate: true },
-);
+    rows.sort((a, b) => a.peerId.localeCompare(b.peerId));
+    peerPorts.value = rows;
+  } catch (error) {
+    peerPorts.value = [];
+    peersError.value = error instanceof Error ? error.message : "Failed to load peer scan";
+  } finally {
+    loadingPeers.value = false;
+  }
+}
 
-watch(
-  () => selectedNodeId.value,
-  (peerId) => {
-    if (!peerId) {
+async function loadMappings(): Promise<void> {
+  loadingMappings.value = true;
+  mappingsError.value = null;
+  try {
+    const response = await fetch(`${apiUrl.value}/port_mappings`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = (await response.json()) as PortMappingsResponse;
+    mappings.value = Array.isArray(data.mappings) ? data.mappings : [];
+  } catch (error) {
+    mappings.value = [];
+    mappingsError.value = error instanceof Error ? error.message : "Failed to load mappings";
+  } finally {
+    loadingMappings.value = false;
+  }
+}
+
+async function refreshScan(): Promise<void> {
+  refreshing.value = true;
+  scanError.value = null;
+  try {
+    const response = await fetch(`${apiUrl.value}/port_scan/refresh`, {
+      method: "POST",
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    await Promise.all([loadLocalScan(), loadPeerScan()]);
+  } catch (error) {
+    scanError.value = error instanceof Error ? error.message : "Failed to refresh scan";
+  } finally {
+    refreshing.value = false;
+  }
+}
+
+function openPullDialog(peerId: string, entry: LocalPortEntry): void {
+  Object.assign(pullDraft, emptyDraft(), {
+    peerId,
+    remoteProtocol: entry.protocol,
+    remoteHost: entry.bind_addr === "*" || entry.bind_addr === "0.0.0.0" || entry.bind_addr === "::"
+      ? "127.0.0.1"
+      : entry.bind_addr,
+    remotePort: entry.port,
+    suggestedLabel: entry.process_name ?? `${entry.protocol}/${entry.port}`,
+    localHost: "127.0.0.1",
+    localPort: "",
+    note: "",
+  });
+  createError.value = null;
+  createSuccess.value = null;
+  showPullDialog.value = true;
+}
+
+function closePullDialog(): void {
+  showPullDialog.value = false;
+  createError.value = null;
+}
+
+async function submitPull(): Promise<void> {
+  createError.value = null;
+  createSuccess.value = null;
+  const body: Record<string, unknown> = {
+    peer_id: pullDraft.peerId,
+    remote_protocol: pullDraft.remoteProtocol,
+    remote_host: pullDraft.remoteHost,
+    remote_port: pullDraft.remotePort,
+    local_host: pullDraft.localHost.trim() || "127.0.0.1",
+  };
+  const localPortRaw = pullDraft.localPort.trim();
+  if (localPortRaw) {
+    const parsed = Number(localPortRaw);
+    if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 65535) {
+      createError.value = "Local port must be between 1 and 65535";
       return;
     }
-    void loadEditorConfig(peerId);
-  },
-  { immediate: true },
-);
-
-function resetRows(): void {
-  forwardRows.splice(0, forwardRows.length);
-  exposeRows.splice(0, exposeRows.length);
-}
-
-function formatForwardRows(forwards: Record<string, string> | null | undefined): void {
-  const entries = Object.entries(forwards ?? {}).sort(([a], [b]) => a.localeCompare(b));
-  if (entries.length === 0) {
-    forwardRows.push({ peerId: "", ruleId: "", spec: "" });
-    return;
+    body.local_port = parsed;
   }
-  for (const [key, spec] of entries) {
-    const [peerId = "", ruleId = ""] = key.split(":", 2);
-    forwardRows.push({ peerId, ruleId, spec });
+  if (pullDraft.note.trim()) {
+    body.note = pullDraft.note.trim();
   }
-}
-
-function formatExposeRows(exposes: Record<string, string> | null | undefined): void {
-  const entries = Object.entries(exposes ?? {}).sort(([a], [b]) => a.localeCompare(b));
-  if (entries.length === 0) {
-    exposeRows.push({ ruleId: "", spec: "" });
-    return;
-  }
-  for (const [ruleId, spec] of entries) {
-    exposeRows.push({ ruleId, spec });
-  }
-}
-
-function hydrateEditor(config: ConfigResponse): void {
-  resetRows();
-  formatForwardRows(config.hot_config?.forwards);
-  formatExposeRows(config.hot_config?.exposes);
-}
-
-function buildConfigUrl(peerId: string, path: string): string {
-  const localPeerId = apiData.value?.peer_id;
-  const localPath = path.startsWith("/api/") ? path.slice(4) : path;
-  if (!localPeerId || peerId === localPeerId) {
-    return `${apiUrl.value}${localPath}`;
-  }
-  const query = new URLSearchParams({ peer: peerId, path });
-  return `${apiUrl.value}/proxy?${query.toString()}`;
-}
-
-async function loadEditorConfig(peerId: string): Promise<void> {
-  editorLoading.value = true;
-  editorError.value = null;
-  editorSuccess.value = null;
   try {
-    const response = await fetch(buildConfigUrl(peerId, "/api/config"));
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-    const config = (await response.json()) as ConfigResponse;
-    hydrateEditor(config);
-  } catch (error) {
-    resetRows();
-    editorError.value = error instanceof Error ? error.message : "Failed to load config";
-  } finally {
-    editorLoading.value = false;
-  }
-}
-
-function addForwardRow(): void {
-  forwardRows.push({ peerId: "", ruleId: "", spec: "" });
-}
-
-function addExposeRow(): void {
-  exposeRows.push({ ruleId: "", spec: "" });
-}
-
-function removeForwardRow(index: number): void {
-  forwardRows.splice(index, 1);
-  if (forwardRows.length === 0) {
-    addForwardRow();
-  }
-}
-
-function removeExposeRow(index: number): void {
-  exposeRows.splice(index, 1);
-  if (exposeRows.length === 0) {
-    addExposeRow();
-  }
-}
-
-function buildForwardMap(): Record<string, string> {
-  const result: Record<string, string> = {};
-  for (const row of forwardRows) {
-    const peerId = row.peerId.trim();
-    const ruleId = row.ruleId.trim();
-    const spec = row.spec.trim();
-    if (!peerId && !ruleId && !spec) {
-      continue;
-    }
-    if (!peerId || !ruleId || !spec) {
-      throw new Error("Each forward row requires peer, rule id, and listen spec");
-    }
-    result[`${peerId}:${ruleId}`] = spec;
-  }
-  return result;
-}
-
-function buildExposeMap(): Record<string, string> {
-  const result: Record<string, string> = {};
-  for (const row of exposeRows) {
-    const ruleId = row.ruleId.trim();
-    const spec = row.spec.trim();
-    if (!ruleId && !spec) {
-      continue;
-    }
-    if (!ruleId || !spec) {
-      throw new Error("Each expose row requires rule id and target spec");
-    }
-    result[ruleId] = spec;
-  }
-  return result;
-}
-
-async function saveMappings(): Promise<void> {
-  if (!selectedNodeId.value) {
-    return;
-  }
-
-  editorLoading.value = true;
-  editorError.value = null;
-  editorSuccess.value = null;
-  try {
-    const response = await fetch(buildConfigUrl(selectedNodeId.value, "/api/config/hot-reload"), {
+    const response = await fetch(`${apiUrl.value}/port_mappings`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        secret: authSecret.value.trim() || undefined,
-        config: {
-          forwards: buildForwardMap(),
-          exposes: buildExposeMap(),
-        },
-      }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
     });
     const payload = await response.json().catch(() => null);
     if (!response.ok) {
-      const message = payload && typeof payload.error === "string" ? payload.error : `HTTP ${response.status}`;
+      const message = payload && typeof payload.message === "string"
+        ? payload.message
+        : payload && typeof payload.error === "string"
+          ? payload.error
+          : `HTTP ${response.status}`;
       throw new Error(message);
     }
-    const config = payload as ConfigResponse;
-    hydrateEditor(config);
-    editorSuccess.value = `Updated mappings for ${selectedNodeId.value}`;
+    createSuccess.value = `Mapped ${pullDraft.peerId} ${pullDraft.remoteProtocol}/${pullDraft.remotePort} → local ${(payload as PortMappingRule).local_port}`;
+    showPullDialog.value = false;
+    await loadMappings();
   } catch (error) {
-    editorError.value = error instanceof Error ? error.message : "Failed to save mappings";
-  } finally {
-    editorLoading.value = false;
+    createError.value = error instanceof Error ? error.message : "Failed to create mapping";
   }
 }
 
-function getStateBadgeClass(state: string): string {
-  switch (state) {
-    case "listening":
-      return "badge-success";
-    case "matched":
-    case "configured":
-      return "badge-info";
-    case "disabled":
-      return "badge-ghost";
-    case "peer_unavailable":
-    case "target_connect_failed":
-    case "rejected":
-    case "protocol_mismatch":
-      return "badge-warning";
-    default:
-      return "badge-outline";
+async function toggleMapping(rule: PortMappingRule): Promise<void> {
+  try {
+    const response = await fetch(`${apiUrl.value}/port_mappings/${rule.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: !rule.enabled }),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    await loadMappings();
+  } catch (error) {
+    mappingsError.value = error instanceof Error ? error.message : "Failed to toggle";
   }
 }
 
-function formatListen(rule: PortForwardMeta): string {
-  if (!rule.listen_port) {
-    return "unbound";
+async function deleteMapping(rule: PortMappingRule): Promise<void> {
+  if (!window.confirm(`Delete mapping ${rule.local_host}:${rule.local_port} → ${rule.peer_id}?`)) {
+    return;
   }
-  return `${rule.listen_host || "127.0.0.1"}:${rule.listen_port}`;
+  try {
+    const response = await fetch(`${apiUrl.value}/port_mappings/${rule.id}`, {
+      method: "DELETE",
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    await loadMappings();
+  } catch (error) {
+    mappingsError.value = error instanceof Error ? error.message : "Failed to delete";
+  }
 }
 
-function formatExposeSummary(rule: PortForwardMeta): string {
-  return `${rule.protocol.toUpperCase()} / ${rule.id}`;
+function formatBindAddr(entry: LocalPortEntry): string {
+  if (entry.bind_addr === "*") return "*";
+  if (entry.bind_addr.includes(":")) return `[${entry.bind_addr}]`;
+  return entry.bind_addr;
 }
+
+function formatLastUpdated(ms: string): string {
+  const num = Number(ms);
+  if (!Number.isFinite(num) || num <= 0) return "-";
+  const delta = Date.now() - num;
+  if (delta < 60_000) return "just now";
+  if (delta < 3_600_000) return `${Math.floor(delta / 60_000)} min ago`;
+  if (delta < 86_400_000) return `${Math.floor(delta / 3_600_000)} h ago`;
+  return new Date(num).toLocaleString();
+}
+
+function findPeerLabel(peerId: string): string {
+  return peerId.length > 16 ? `${peerId.slice(0, 16)}…` : peerId;
+}
+
+onMounted(() => {
+  void loadAll();
+  pollTimer = window.setInterval(() => {
+    void loadAll();
+  }, 15_000);
+});
+
+onBeforeUnmount(() => {
+  if (pollTimer !== null) {
+    window.clearInterval(pollTimer);
+    pollTimer = null;
+  }
+});
 </script>
 
 <template>
   <div class="card bg-base-100 border border-base-300 rounded-box">
     <div class="card-body gap-5">
+      <!-- Header + summary -->
       <div class="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
           <h3 class="card-title text-base">Port Mapping</h3>
           <p class="text-xs text-base-content/60">
-            Visual tunnel lanes plus inline editing for `forwards` and `exposes`.
+            Scan local listening ports, discover peers' services, and pull any of them to a local port.
           </p>
         </div>
-        <div class="flex gap-2">
+        <div class="flex flex-wrap gap-2">
+          <div class="badge badge-outline">{{ localPorts.length }} local</div>
           <div class="badge badge-outline">
-            {{ forwardViews.length }} forwards
+            {{ totalPeerPorts }} peer ports / {{ peerCount }} peers
           </div>
-          <div class="badge badge-outline">
-            {{ activeCount }} active
-          </div>
+          <div class="badge badge-outline">{{ activeMappingCount }} active mapping{{ activeMappingCount === 1 ? "" : "s" }}</div>
+          <button class="btn btn-sm" type="button" :disabled="refreshing" @click="refreshScan">
+            <span v-if="refreshing" class="loading loading-spinner loading-xs" />
+            Rescan &amp; broadcast
+          </button>
         </div>
       </div>
 
-      <div v-if="forwardViews.length === 0 && exposeViews.length === 0" class="alert alert-info text-sm">
-        No port forwarding metadata discovered.
-      </div>
-
-      <div v-else class="space-y-6">
-        <section v-if="forwardViews.length > 0" class="space-y-3">
-          <div class="flex items-center justify-between">
+      <!-- Two-column: local + peers -->
+      <div class="grid gap-4 lg:grid-cols-2">
+        <section class="rounded-box border border-base-300 bg-base-200/45 p-4">
+          <div class="mb-3 flex items-center justify-between">
             <h4 class="text-sm font-semibold uppercase tracking-[0.18em] text-base-content/55">
-              Forward Lanes
+              Local listening ({{ selfPeerId }})
             </h4>
-            <span class="text-xs text-base-content/50">
-              listen -> peer -> rule
-            </span>
+            <button class="btn btn-xs btn-ghost" type="button" :disabled="loadingScan" @click="loadLocalScan">
+              Refresh
+            </button>
           </div>
-
-          <div class="space-y-3">
-            <div
-              v-for="{ owner, targetPeer, rule } in forwardViews"
-              :key="`${owner.id}:${rule.id}:${rule.protocol}:${rule.peer_id}`"
-              class="rounded-box border border-base-300 bg-base-200/45 p-4"
-            >
-              <div class="flex items-center justify-between gap-3">
-                <div>
-                  <div class="text-xs uppercase tracking-[0.18em] text-base-content/45">
-                    {{ rule.protocol }}
-                  </div>
-                  <div class="mt-1 text-sm font-semibold">
-                    {{ owner.id }} / {{ rule.id }}
-                  </div>
-                </div>
-                <div class="badge badge-sm" :class="getStateBadgeClass(rule.state)">
-                  {{ rule.state }}
-                </div>
-              </div>
-
-              <div class="mt-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,0.9fr)_auto_minmax(0,0.9fr)] md:items-center">
-                <div class="rounded-xl border border-primary/20 bg-primary/8 px-4 py-3">
-                  <div class="text-[11px] uppercase tracking-[0.18em] text-base-content/45">Local listener</div>
-                  <div class="mt-1 font-mono text-sm break-all">{{ formatListen(rule) }}</div>
-                  <div class="mt-2 text-xs text-base-content/60">Owner {{ owner.id }}</div>
-                </div>
-
-                <div class="hidden md:flex items-center justify-center text-base-content/35 text-lg">
-                  →
-                </div>
-
-                <div class="rounded-xl border border-secondary/20 bg-secondary/8 px-4 py-3">
-                  <div class="text-[11px] uppercase tracking-[0.18em] text-base-content/45">Remote peer</div>
-                  <div class="mt-1 font-mono text-sm break-all">{{ rule.peer_id || "-" }}</div>
-                  <div class="mt-2 text-xs text-base-content/60">
-                    {{ targetPeer ? `${targetPeer.addresses.length} known addresses` : "Peer metadata unavailable" }}
-                  </div>
-                </div>
-
-                <div class="hidden md:flex items-center justify-center text-base-content/35 text-lg">
-                  →
-                </div>
-
-                <div class="rounded-xl border border-accent/20 bg-accent/8 px-4 py-3">
-                  <div class="text-[11px] uppercase tracking-[0.18em] text-base-content/45">Remote expose</div>
-                  <div class="mt-1 font-mono text-sm break-all">{{ rule.id }}</div>
-                  <div class="mt-2 text-xs text-base-content/60">
-                    Matched by rule key on {{ rule.peer_id || "target peer" }}
-                  </div>
-                </div>
-              </div>
-            </div>
+          <div v-if="scanError" class="alert alert-error text-xs mb-3">{{ scanError }}</div>
+          <div v-if="loadingScan && localPorts.length === 0" class="text-xs text-base-content/50">
+            Loading…
+          </div>
+          <div v-else-if="localPorts.length === 0" class="text-xs text-base-content/50">
+            Nothing listening (or `lsof` unavailable).
+          </div>
+          <div v-else class="overflow-x-auto">
+            <table class="table table-xs">
+              <thead>
+                <tr>
+                  <th>Proto</th>
+                  <th>Port</th>
+                  <th>Bind</th>
+                  <th>Process</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(entry, i) in localPorts" :key="`local-${i}`">
+                  <td class="font-mono">{{ entry.protocol }}</td>
+                  <td class="font-mono">{{ entry.port }}</td>
+                  <td class="font-mono text-xs">{{ formatBindAddr(entry) }}</td>
+                  <td class="text-xs">{{ entry.process_name ?? "-" }}</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </section>
 
-        <section v-if="exposeViews.length > 0" class="space-y-3">
-          <div class="flex items-center justify-between">
+        <section class="rounded-box border border-base-300 bg-base-200/45 p-4">
+          <div class="mb-3 flex items-center justify-between">
             <h4 class="text-sm font-semibold uppercase tracking-[0.18em] text-base-content/55">
-              Expose Docks
+              Peer listening
             </h4>
-            <span class="text-xs text-base-content/50">
-              published targets available to matching forwards
-            </span>
+            <button class="btn btn-xs btn-ghost" type="button" :disabled="loadingPeers" @click="loadPeerScan">
+              Refresh
+            </button>
           </div>
-
-          <div class="grid gap-3 md:grid-cols-2">
+          <div v-if="peersError" class="alert alert-error text-xs mb-3">{{ peersError }}</div>
+          <div v-if="loadingPeers && peerPorts.length === 0" class="text-xs text-base-content/50">
+            Loading…
+          </div>
+          <div v-else-if="peerPorts.length === 0" class="text-xs text-base-content/50">
+            No peers have broadcast yet.
+          </div>
+          <div v-else class="space-y-4">
             <div
-              v-for="{ owner, rule } in exposeViews"
-              :key="`${owner.id}:${rule.id}:${rule.protocol}`"
-              class="rounded-box border border-base-300 bg-base-200/35 p-4"
+              v-for="group in peerPorts"
+              :key="`peer-${group.peerId}`"
+              class="rounded-xl border border-base-300 bg-base-100 p-3"
             >
-              <div class="flex items-start justify-between gap-3">
-                <div>
-                  <div class="text-xs uppercase tracking-[0.18em] text-base-content/45">
-                    {{ owner.id }}
-                  </div>
-                  <div class="mt-1 text-sm font-semibold">
-                    {{ formatExposeSummary(rule) }}
-                  </div>
-                </div>
-                <div class="badge badge-sm" :class="getStateBadgeClass(rule.state)">
-                  {{ rule.state }}
-                </div>
+              <div class="mb-2 flex items-center justify-between text-xs">
+                <span class="font-semibold">
+                  {{ findPeerLabel(group.peerId) }}
+                </span>
+                <span class="text-base-content/50">
+                  {{ formatLastUpdated(group.lastUpdated) }} · {{ group.ports.length }} ports
+                </span>
               </div>
-
-              <div class="mt-4 rounded-xl border border-base-300 bg-base-100 px-4 py-3">
-                <div class="text-[11px] uppercase tracking-[0.18em] text-base-content/45">Expose slot</div>
-                <div class="mt-1 font-mono text-sm break-all">{{ rule.id }}</div>
-                <div class="mt-2 text-xs text-base-content/60">
-                  Waiting for a matching forward on another node.
-                </div>
+              <div v-if="group.ports.length === 0" class="text-xs text-base-content/40">
+                (empty)
               </div>
+              <table v-else class="table table-xs">
+                <thead>
+                  <tr>
+                    <th>Proto</th>
+                    <th>Port</th>
+                    <th>Bind</th>
+                    <th>Process</th>
+                    <th class="text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(entry, i) in group.ports" :key="`peer-${group.peerId}-${i}`">
+                    <td class="font-mono">{{ entry.protocol }}</td>
+                    <td class="font-mono">{{ entry.port }}</td>
+                    <td class="font-mono text-xs">{{ formatBindAddr(entry) }}</td>
+                    <td class="text-xs">{{ entry.process_name ?? "-" }}</td>
+                    <td class="text-right">
+                      <button
+                        class="btn btn-xs btn-primary"
+                        type="button"
+                        @click="openPullDialog(group.peerId, entry)"
+                      >
+                        Pull to local
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </div>
         </section>
       </div>
 
-      <div class="divider my-1"></div>
-
-      <section class="space-y-4">
-        <div class="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-          <div>
-            <h4 class="text-sm font-semibold uppercase tracking-[0.18em] text-base-content/55">
-              Edit Mapping
-            </h4>
-            <p class="text-xs text-base-content/60">
-              Save `forwards` and `exposes` for a selected node using the hot reload API.
-            </p>
-          </div>
-        <div class="grid gap-3 lg:grid-cols-2">
-          <label class="form-control">
-            <span class="label-text text-xs uppercase tracking-[0.18em] text-base-content/50">Node</span>
-            <select v-model="selectedNodeId" class="select select-bordered select-sm w-full">
-              <option v-for="item in nodeOptions" :key="item.id" :value="item.id">
-                {{ item.id }}{{ item.self ? " (local)" : "" }}
-              </option>
-            </select>
-          </label>
-            <label class="form-control">
-              <span class="label-text text-xs uppercase tracking-[0.18em] text-base-content/50">Request secret</span>
-              <input
-                v-model="authSecret"
-                type="password"
-                class="input input-bordered input-sm w-full"
-                placeholder="Optional hot_reload secret"
-              />
-            </label>
-          </div>
-        </div>
-
-        <div v-if="editorError" class="alert alert-error text-sm">
-          {{ editorError }}
-        </div>
-        <div v-if="editorSuccess" class="alert alert-success text-sm">
-          {{ editorSuccess }}
-        </div>
-
-        <div class="grid gap-5 xl:grid-cols-2">
-          <div class="space-y-3 rounded-box border border-base-300 bg-base-200/35 p-4">
-            <div class="flex items-center justify-between">
-              <div>
-                <div class="text-sm font-semibold">Forwards</div>
-                <div class="text-xs text-base-content/60">`peer_id:rule_id` -> `protocol://listen_host:listen_port`</div>
-              </div>
-              <button class="btn btn-xs btn-outline" type="button" @click="addForwardRow">Add</button>
-            </div>
-
-            <div class="space-y-3">
-              <div
-                v-for="(row, index) in forwardRows"
-                :key="`forward-${index}`"
-                class="grid gap-2 rounded-xl border border-base-300 bg-base-100 p-3"
-              >
-                <div class="grid gap-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,2.1fr)_auto] xl:items-center">
-                  <input v-model="row.peerId" class="input input-bordered input-sm w-full" placeholder="peer id" />
-                  <input v-model="row.ruleId" class="input input-bordered input-sm w-full" placeholder="rule id" />
-                  <input
-                    v-model="row.spec"
-                    class="input input-bordered input-sm w-full font-mono"
-                    placeholder="tcp://127.0.0.1:10022"
-                  />
-                  <button class="btn btn-sm btn-ghost xl:justify-self-end" type="button" @click="removeForwardRow(index)">Remove</button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="space-y-3 rounded-box border border-base-300 bg-base-200/35 p-4">
-            <div class="flex items-center justify-between">
-              <div>
-                <div class="text-sm font-semibold">Exposes</div>
-                <div class="text-xs text-base-content/60">`rule_id` -> `protocol://target_host:target_port`</div>
-              </div>
-              <button class="btn btn-xs btn-outline" type="button" @click="addExposeRow">Add</button>
-            </div>
-
-            <div class="space-y-3">
-              <div
-                v-for="(row, index) in exposeRows"
-                :key="`expose-${index}`"
-                class="grid gap-2 rounded-xl border border-base-300 bg-base-100 p-3"
-              >
-                <div class="grid gap-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,2.3fr)_auto] xl:items-center">
-                  <input v-model="row.ruleId" class="input input-bordered input-sm w-full" placeholder="rule id" />
-                  <input
-                    v-model="row.spec"
-                    class="input input-bordered input-sm w-full font-mono"
-                    placeholder="tcp://127.0.0.1:22"
-                  />
-                  <button class="btn btn-sm btn-ghost xl:justify-self-end" type="button" @click="removeExposeRow(index)">Remove</button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="flex justify-end gap-3">
-          <button class="btn btn-ghost" type="button" :disabled="editorLoading || !selectedNodeId" @click="selectedNodeId && loadEditorConfig(selectedNodeId)">
-            Reload
+      <!-- Active mappings -->
+      <section class="rounded-box border border-base-300 bg-base-200/35 p-4">
+        <div class="mb-3 flex items-center justify-between">
+          <h4 class="text-sm font-semibold uppercase tracking-[0.18em] text-base-content/55">
+            Active mappings
+          </h4>
+          <button class="btn btn-xs btn-ghost" type="button" :disabled="loadingMappings" @click="loadMappings">
+            Refresh
           </button>
-          <button class="btn btn-primary" type="button" :disabled="editorLoading || !selectedNodeId" @click="saveMappings">
-            <span v-if="editorLoading" class="loading loading-spinner loading-sm"></span>
-            Save mapping
-          </button>
+        </div>
+        <div v-if="mappingsError" class="alert alert-error text-xs mb-3">{{ mappingsError }}</div>
+        <div v-if="createSuccess" class="alert alert-success text-xs mb-3">{{ createSuccess }}</div>
+        <div v-if="mappings.length === 0" class="text-xs text-base-content/50">
+          No mappings yet. Pull a peer port to create one.
+        </div>
+        <div v-else class="overflow-x-auto">
+          <table class="table table-sm">
+            <thead>
+              <tr>
+                <th>Enabled</th>
+                <th>Local</th>
+                <th>Peer</th>
+                <th>Remote</th>
+                <th>Protocol</th>
+                <th>Note</th>
+                <th class="text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="rule in mappings" :key="rule.id">
+                <td>
+                  <input
+                    type="checkbox"
+                    class="toggle toggle-sm"
+                    :checked="rule.enabled"
+                    @change="toggleMapping(rule)"
+                  />
+                </td>
+                <td class="font-mono text-xs">{{ rule.local_host }}:{{ rule.local_port }}</td>
+                <td class="text-xs">{{ findPeerLabel(rule.peer_id) }}</td>
+                <td class="font-mono text-xs">{{ rule.remote_host }}:{{ rule.remote_port }}</td>
+                <td class="font-mono text-xs uppercase">{{ rule.remote_protocol }}</td>
+                <td class="text-xs">{{ rule.note ?? "-" }}</td>
+                <td class="text-right">
+                  <button class="btn btn-xs btn-ghost text-error" type="button" @click="deleteMapping(rule)">
+                    Delete
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </section>
+
+      <!-- Pull dialog -->
+      <div v-if="showPullDialog" class="modal modal-open">
+        <div class="modal-box">
+          <h3 class="font-semibold text-sm mb-3">
+            Pull {{ pullDraft.remoteProtocol }} / {{ pullDraft.remotePort }} from {{ findPeerLabel(pullDraft.peerId) }}
+          </h3>
+          <div v-if="pullDraft.suggestedLabel" class="text-xs text-base-content/50 mb-3">
+            Service: {{ pullDraft.suggestedLabel }}
+          </div>
+          <div v-if="createError" class="alert alert-error text-xs mb-3">{{ createError }}</div>
+
+          <div class="grid gap-3">
+            <label class="form-control">
+              <span class="label-text text-xs">Remote host (on peer)</span>
+              <input v-model="pullDraft.remoteHost" class="input input-bordered input-sm w-full" />
+            </label>
+            <label class="form-control">
+              <span class="label-text text-xs">Local host</span>
+              <input v-model="pullDraft.localHost" class="input input-bordered input-sm w-full" />
+            </label>
+            <label class="form-control">
+              <span class="label-text text-xs">
+                Local port <span class="text-base-content/40">(blank = auto, e.g. remote+40000)</span>
+              </span>
+              <input
+                v-model="pullDraft.localPort"
+                class="input input-bordered input-sm w-full font-mono"
+                placeholder="auto"
+                inputmode="numeric"
+              />
+            </label>
+            <label class="form-control">
+              <span class="label-text text-xs">Note (optional)</span>
+              <input v-model="pullDraft.note" class="input input-bordered input-sm w-full" placeholder="e.g. staging postgres" />
+            </label>
+          </div>
+
+          <div class="modal-action">
+            <button class="btn btn-ghost btn-sm" type="button" @click="closePullDialog">Cancel</button>
+            <button class="btn btn-primary btn-sm" type="button" @click="submitPull">Create mapping</button>
+          </div>
+        </div>
+        <div class="modal-backdrop" @click="closePullDialog"></div>
+      </div>
     </div>
   </div>
 </template>
