@@ -456,7 +456,7 @@ onBeforeUnmount(() => {
         <div v-if="mappings.length === 0" class="text-xs text-base-content/50">
           No mappings yet. Pull a peer port to create one.
         </div>
-        <div v-else class="overflow-x-auto">
+        <div v-else class="overflow-x-auto hidden sm:block">
           <table class="table table-sm">
             <thead>
               <tr>
@@ -493,6 +493,39 @@ onBeforeUnmount(() => {
             </tbody>
           </table>
         </div>
+        <ul v-if="mappings.length > 0" class="list sm:hidden">
+          <li
+            v-for="rule in mappings"
+            :key="`mapping-mobile-${rule.id}`"
+            class="list-row flex-col items-stretch gap-2 py-3"
+          >
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="badge badge-soft badge-sm font-mono uppercase">{{ rule.remote_protocol }}</span>
+              <span class="font-mono text-xs">{{ rule.local_host }}:{{ rule.local_port }}</span>
+              <span class="text-base-content/50 text-xs">→</span>
+              <span class="font-mono text-xs">{{ rule.remote_host }}:{{ rule.remote_port }}</span>
+            </div>
+            <div class="flex items-center gap-2 text-xs text-base-content/60">
+              <span>{{ findPeerLabel(rule.peer_id) }}</span>
+              <span v-if="rule.note" class="text-base-content/40">· {{ rule.note }}</span>
+            </div>
+            <div class="flex items-center justify-between">
+              <input
+                type="checkbox"
+                class="toggle toggle-sm"
+                :checked="rule.enabled"
+                @change="toggleMapping(rule)"
+              />
+              <button
+                class="btn btn-xs btn-ghost text-error"
+                type="button"
+                @click="deleteMapping(rule)"
+              >
+                Delete
+              </button>
+            </div>
+          </li>
+        </ul>
       </section>
 
       <!-- Pull dialog -->
