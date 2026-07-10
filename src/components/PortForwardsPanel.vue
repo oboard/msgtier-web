@@ -51,7 +51,7 @@ function emptyDraft(): PullDraft {
     remoteHost: "127.0.0.1",
     remotePort: 0,
     suggestedLabel: "",
-    localHost: "127.0.0.1",
+    localHost: "0.0.0.0",
     localPort: "",
     note: "",
   };
