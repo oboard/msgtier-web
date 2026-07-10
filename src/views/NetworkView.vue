@@ -11,7 +11,7 @@ const activeTab = ref<Tab>("graph");
 <template>
   <!-- Desktop: original vertical stack (md and above) -->
   <div class="hidden md:block space-y-6">
-    <section class="min-h-[320px] md:min-h-[480px] xl:min-h-[600px]">
+    <section class="h-80 md:h-120 xl:h-150">
       <NetworkGraph />
     </section>
     <section>
@@ -51,7 +51,7 @@ const activeTab = ref<Tab>("graph");
       </button>
     </div>
 
-    <section v-show="activeTab === 'graph'" class="min-h-[320px]">
+    <section v-show="activeTab === 'graph'" class="h-80">
       <NetworkGraph />
     </section>
     <section v-show="activeTab === 'ports'">
