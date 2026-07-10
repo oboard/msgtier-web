@@ -76,7 +76,7 @@ function initializeGraph() {
     .append("div")
     .attr(
       "class",
-      "relative flex w-full min-h-[320px] h-[50svh] max-h-[560px] items-center justify-center overflow-hidden rounded-lg md:h-[600px] md:max-h-none xl:h-full",
+      "relative flex w-full min-h-[280px] h-[40svh] max-h-[480px] items-center justify-center overflow-hidden rounded-lg md:h-[50svh] md:max-h-[560px] xl:h-full xl:max-h-none",
     )
     .style("background-color", "var(--color-base-200)");
 
