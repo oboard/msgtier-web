@@ -318,8 +318,8 @@ onBeforeUnmount(() => {
           <div v-else-if="localPorts.length === 0" class="text-xs text-base-content/50">
             Nothing listening (or `lsof` unavailable).
           </div>
-          <div v-else class="overflow-x-auto">
-            <table class="table table-xs hidden sm:table">
+          <div v-else class="overflow-x-auto hidden sm:block">
+            <table class="table table-xs w-full">
               <thead>
                 <tr>
                   <th>Proto</th>
@@ -385,7 +385,8 @@ onBeforeUnmount(() => {
               <div v-if="group.ports.length === 0" class="text-xs text-base-content/40">
                 (empty)
               </div>
-              <table v-else class="table table-xs hidden sm:table">
+              <div v-else class="overflow-x-auto hidden sm:block">
+                <table class="table table-xs w-full">
                 <thead>
                   <tr>
                     <th>Proto</th>
@@ -413,6 +414,7 @@ onBeforeUnmount(() => {
                   </tr>
                 </tbody>
               </table>
+              </div>
               <ul v-if="group.ports.length > 0" class="list sm:hidden mt-1">
                 <li
                   v-for="(entry, i) in group.ports"
@@ -457,15 +459,14 @@ onBeforeUnmount(() => {
           No mappings yet. Pull a peer port to create one.
         </div>
         <div v-else class="overflow-x-auto hidden sm:block">
-          <table class="table table-sm">
+          <table class="table table-xs">
             <thead>
               <tr>
-                <th>Enabled</th>
+                <th class="w-10">On</th>
                 <th>Local</th>
                 <th>Peer</th>
                 <th>Remote</th>
-                <th>Protocol</th>
-                <th>Note</th>
+                <th>Proto</th>
                 <th class="text-right">Action</th>
               </tr>
             </thead>
@@ -474,19 +475,20 @@ onBeforeUnmount(() => {
                 <td>
                   <input
                     type="checkbox"
-                    class="toggle toggle-sm"
+                    class="toggle toggle-xs"
                     :checked="rule.enabled"
                     @change="toggleMapping(rule)"
                   />
                 </td>
                 <td class="font-mono text-xs">{{ rule.local_host }}:{{ rule.local_port }}</td>
-                <td class="text-xs">{{ findPeerLabel(rule.peer_id) }}</td>
+                <td class="text-xs max-w-[120px] truncate" :title="rule.peer_id + (rule.note ? ' · ' + rule.note : '')">
+                  {{ findPeerLabel(rule.peer_id) }}
+                </td>
                 <td class="font-mono text-xs">{{ rule.remote_host }}:{{ rule.remote_port }}</td>
-                <td class="font-mono text-xs uppercase">{{ rule.remote_protocol }}</td>
-                <td class="text-xs">{{ rule.note ?? "-" }}</td>
+                <td><span class="badge badge-soft badge-xs font-mono uppercase">{{ rule.remote_protocol }}</span></td>
                 <td class="text-right">
                   <button class="btn btn-xs btn-ghost text-error" type="button" @click="deleteMapping(rule)">
-                    Delete
+                    Del
                   </button>
                 </td>
               </tr>
