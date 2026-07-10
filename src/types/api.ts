@@ -58,7 +58,7 @@ export interface Channel {
 }
 
 export interface PeerMetadata {
-  scripts?: string[];
+  scripts?: string[] | string;
   channels?: Channel[];
   port_forwards?: PortForwardMeta[];
   [key: string]: unknown;

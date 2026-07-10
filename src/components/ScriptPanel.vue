@@ -35,21 +35,17 @@ function parseScripts(peer: Peer): string[] {
     return [];
   }
 
-  try {
-    if (Array.isArray(raw)) {
-      return raw
-        .filter((item): item is string => typeof item === "string")
-        .map((name) => name.trim())
-        .filter((name) => name.length > 0);
-    }
-  } catch {
+  if (Array.isArray(raw)) {
+    return raw
+      .filter((item): item is string => typeof item === "string")
+      .map((name) => name.trim())
+      .filter((name) => name.length > 0);
+  } else {
     return raw
       .split(",")
       .map((name) => name.trim())
       .filter((name) => name.length > 0);
   }
-
-  return [];
 }
 
 function getRunState(key: string): ScriptRunState {
@@ -128,7 +124,7 @@ async function runScript(peer: Peer, scriptName: string): Promise<void> {
         No scripts discovered from node metadata.
       </div>
 
-      <div v-else class="space-y-4 overflow-auto pr-1 max-h-[320px] sm:max-h-[560px]">
+      <div v-else class="space-y-4 overflow-auto pr-1 sm:max-h-140">
         <div v-for="{ peer, scripts } in peersWithScripts" :key="peer.id"
           class="border border-base-300 rounded-lg p-3 bg-base-200/40">
           <div class="font-mono text-xs text-base-content/80 mb-2">
