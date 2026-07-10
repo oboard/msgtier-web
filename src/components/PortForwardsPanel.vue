@@ -319,7 +319,7 @@ onBeforeUnmount(() => {
             Nothing listening (or `lsof` unavailable).
           </div>
           <div v-else class="overflow-x-auto">
-            <table class="table table-xs">
+            <table class="table table-xs hidden sm:table">
               <thead>
                 <tr>
                   <th>Proto</th>
@@ -338,6 +338,18 @@ onBeforeUnmount(() => {
               </tbody>
             </table>
           </div>
+          <ul v-if="localPorts.length > 0" class="list sm:hidden">
+            <li
+              v-for="(entry, i) in localPorts"
+              :key="`local-mobile-${i}`"
+              class="list-row items-center gap-2 py-2"
+            >
+              <span class="badge badge-soft badge-sm font-mono">{{ entry.protocol }}</span>
+              <span class="list-col-grow font-mono text-sm">:{{ entry.port }}</span>
+              <span class="text-xs text-base-content/60">{{ entry.process_name ?? "-" }}</span>
+              <span class="list-col-wrap text-xs text-base-content/40 font-mono">{{ formatBindAddr(entry) }}</span>
+            </li>
+          </ul>
         </section>
 
         <section class="rounded-box border border-base-300 bg-base-200/45 p-4">
@@ -373,7 +385,7 @@ onBeforeUnmount(() => {
               <div v-if="group.ports.length === 0" class="text-xs text-base-content/40">
                 (empty)
               </div>
-              <table v-else class="table table-xs">
+              <table v-else class="table table-xs hidden sm:table">
                 <thead>
                   <tr>
                     <th>Proto</th>
@@ -401,6 +413,29 @@ onBeforeUnmount(() => {
                   </tr>
                 </tbody>
               </table>
+              <ul v-if="group.ports.length > 0" class="list sm:hidden mt-1">
+                <li
+                  v-for="(entry, i) in group.ports"
+                  :key="`peer-mobile-${group.peerId}-${i}`"
+                  class="list-row items-start gap-2 py-2"
+                >
+                  <div class="list-col-grow flex flex-col gap-0.5">
+                    <div class="flex items-center gap-2">
+                      <span class="badge badge-soft badge-sm font-mono">{{ entry.protocol }}</span>
+                      <span class="font-mono text-sm">:{{ entry.port }}</span>
+                      <span class="text-xs text-base-content/60">{{ entry.process_name ?? "-" }}</span>
+                    </div>
+                    <span class="text-xs text-base-content/40 font-mono">{{ formatBindAddr(entry) }}</span>
+                  </div>
+                  <button
+                    class="btn btn-xs btn-primary shrink-0"
+                    type="button"
+                    @click="openPullDialog(group.peerId, entry)"
+                  >
+                    Pull
+                  </button>
+                </li>
+              </ul>
             </div>
           </div>
         </section>
