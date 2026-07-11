@@ -25,7 +25,7 @@ interface RawChatMessage {
   id?: string;
   source_id?: string;
   target_id?: string;
-  kind?: string;
+  kind: string;
   content?: unknown;
   timestamp?: number | string;
 }
@@ -844,7 +844,7 @@ const getDownloadUrl = (msg: ChatMessage) => {
 </script>
 
 <template>
-  <div class="card bg-base-100 h-[calc(100vh-12rem)] md:h-[600px] flex flex-row overflow-hidden relative">
+  <div class="card bg-base-100 h-[calc(100vh-12rem)] md:h-150 flex flex-row overflow-hidden relative">
     <!-- Sidebar: Peer List -->
     <div
       class="w-full md:w-80 border-r border-base-300 flex flex-col bg-base-200 transition-all duration-300 absolute md:relative z-10 h-full"
@@ -999,7 +999,7 @@ const getDownloadUrl = (msg: ChatMessage) => {
 
               <!-- Image Message -->
               <div v-else-if="msg.kind === 'image'" class="flex flex-col gap-2">
-                <img :src="getDownloadUrl(msg)" class="max-w-[200px] rounded-lg border border-base-content/20" />
+                <img :src="getDownloadUrl(msg)" class="max-w-50 rounded-lg border border-base-content/20" />
                 <div class="flex items-center justify-between gap-2">
                   <span class="text-xs opacity-70">{{ (msg.content as FileContent).filename }}</span>
                   <button class="btn btn-ghost btn-xs" @click="downloadFile(msg)" title="下载">
@@ -1009,7 +1009,7 @@ const getDownloadUrl = (msg: ChatMessage) => {
               </div>
 
               <div v-else-if="msg.kind === 'video'" class="flex flex-col gap-2">
-                <video controls class="max-w-[240px] rounded-lg border border-base-content/20">
+                <video controls class="max-w-60 rounded-lg border border-base-content/20">
                   <source :src="getDownloadUrl(msg)" />
                 </video>
                 <div class="flex items-center justify-between gap-2">
