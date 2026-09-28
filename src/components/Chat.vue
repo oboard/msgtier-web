@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { apiData } from '../stores/data';
 import type { Channel, Peer } from '../types/api';
+import { uploadObject } from '../services/objectUpload';
 
 interface FileContent {
   id: string;
@@ -492,17 +493,7 @@ const uploadAndSendFiles = async (files: File[]) => {
 
   for (const [index, file] of files.entries()) {
     try {
-      const response = await fetch('/api/object', {
-        method: 'POST',
-        body: file
-      });
-
-      if (!response.ok) {
-        throw new Error('Upload failed');
-      }
-
-      const result = await response.json();
-      const objectId = result.id;
+      const objectId = await uploadObject(file);
 
       const kind = file.type.startsWith('image/')
         ? 'image'
@@ -523,10 +514,13 @@ const uploadAndSendFiles = async (files: File[]) => {
 
       if (socket.value && socket.value.readyState === WebSocket.OPEN) {
         socket.value.send(JSON.stringify(payload));
+      } else {
+        throw new Error('File uploaded, but chat disconnected before the message could be sent. Reconnect and retry.');
       }
     } catch (e) {
       console.error('File upload error:', e);
-      alert(`Failed to upload ${normalizeAttachmentFileName(file, `file-${index + 1}`)}`);
+      const reason = e instanceof Error ? e.message : String(e);
+      alert(`Failed to transfer ${normalizeAttachmentFileName(file, `file-${index + 1}`)}: ${reason}`);
     }
   }
 };
